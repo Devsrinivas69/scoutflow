@@ -9,11 +9,35 @@ export interface DecisionMaker {
   linkedinUrl?: string;
   companyDomain: string;
   companyName: string;
+  sourceApi?: string;
+  apiResponseId?: string;
+  discoveryMethod?: string;
+  selectedReason?: string;
 }
 
-/**
- * Run tasks with a concurrency limit (avoids thundering herd on external API)
- */
+const PRIORITIES = [
+  "founder", "ceo", "chief executive", "co-founder",
+  "cto", "chief technology", "coo", "chief operating", "cro", "chief revenue",
+  "vp sales", "vice president of sales", "vp marketing", "vice president of marketing",
+  "head of growth", "growth lead", "head of sales", "sales lead", "head of marketing",
+  "director of sales", "director of marketing", "director of growth",
+  "business development", "bizdev", "director"
+];
+
+function getTitlePriority(title: string): { priority: number; reason: string } | null {
+  if (!title) return null;
+  const lower = title.toLowerCase();
+  for (let i = 0; i < PRIORITIES.length; i++) {
+    if (lower.includes(PRIORITIES[i])) {
+      return {
+        priority: i,
+        reason: `Priority Title: ${PRIORITIES[i].toUpperCase()}`,
+      };
+    }
+  }
+  return null;
+}
+
 async function pLimit<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number
@@ -38,8 +62,8 @@ export async function findDecisionMakers(
 ): Promise<DecisionMaker[]> {
   const apiKey = process.env.PROSPEO_API_KEY;
   if (!apiKey) {
-    console.warn("PROSPEO_API_KEY is not set. Generating mock contacts for all companies.");
-    return companies.flatMap(getMockDecisionMakers);
+    console.warn("PROSPEO_API_KEY is not set. Returning empty list.");
+    return [];
   }
 
   // Run up to 5 company lookups in parallel instead of sequential
@@ -47,12 +71,32 @@ export async function findDecisionMakers(
     (company) => () =>
       withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
         console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
-        return getMockDecisionMakers(company);
+        return [];
       })
   );
 
   const results = await pLimit(tasks, 5);
-  return results.flat();
+  const allContacts = results.flat();
+
+  // Filter out irrelevant contacts & sort by priority
+  const processedContacts = allContacts
+    .map((c) => {
+      const pMatch = getTitlePriority(c.title);
+      if (!pMatch) return null;
+      return {
+        ...c,
+        selectedReason: pMatch.reason,
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+    .sort((a, b) => {
+      const prioA = getTitlePriority(a.title)?.priority ?? 99;
+      const prioB = getTitlePriority(b.title)?.priority ?? 99;
+      return prioA - prioB;
+    });
+
+  console.log(`[Prospeo] Found & filtered ${processedContacts.length} total relevant contacts`);
+  return processedContacts;
 }
 
 async function searchCompanyContacts(
@@ -71,17 +115,9 @@ async function searchCompanyContacts(
           websites: {
             include: [company.domain]
           }
-        },
-        person_title: {
-          include: [
-            "CEO", "CTO", "CMO", "COO", "CFO",
-            "VP Sales", "VP Marketing", "Head of Sales",
-            "Director of Sales", "Founder", "Co-Founder",
-            "VP of Sales", "Head of Growth", "Director of Marketing"
-          ]
         }
       },
-      limit: 10,
+      limit: 15,
     }),
   });
 
@@ -94,13 +130,15 @@ async function searchCompanyContacts(
   const results = data.response ?? data.results ?? data.contacts ?? [];
 
   if (results.length === 0) {
-    return getMockDecisionMakers(company);
+    return [];
   }
 
   return results.map((item: any) => {
     const p = item.person ?? item ?? {};
     const firstName = (p.first_name ?? p.firstName ?? "") as string;
     const lastName = (p.last_name ?? p.lastName ?? "") as string;
+    const personId = (p.person_id ?? p.id ?? undefined) as string | undefined;
+
     return {
       firstName,
       lastName,
@@ -109,52 +147,9 @@ async function searchCompanyContacts(
       linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
       companyDomain: company.domain,
       companyName: company.name,
+      sourceApi: "Prospeo",
+      apiResponseId: personId,
+      discoveryMethod: "search-person",
     };
   });
-}
-
-function getDeterministicIndex(str: string, max: number): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return Math.abs(hash) % max;
-}
-
-function getMockDecisionMakers(company: LookalikeCompany): DecisionMaker[] {
-  const firstNames = ["John", "Sarah", "David", "Emma", "Michael", "Olivia", "James", "Sophia", "Robert", "Isabella", "William", "Mia", "Joseph", "Charlotte", "Daniel", "Amelia", "Thomas", "Harper", "Charles", "Evelyn"];
-  const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
-  const titles = ["CEO", "CTO", "VP of Sales", "Head of Growth", "Director of Marketing", "COO"];
-
-  const hash1 = getDeterministicIndex(company.domain, firstNames.length);
-  const hash2 = getDeterministicIndex(company.domain + "alt", lastNames.length);
-
-  const contacts: DecisionMaker[] = [];
-  
-  // Person 1 (CEO / CTO / Founder)
-  const fn1 = firstNames[hash1];
-  const ln1 = lastNames[hash2];
-  contacts.push({
-    firstName: fn1,
-    lastName: ln1,
-    fullName: `${fn1} ${ln1}`,
-    title: titles[getDeterministicIndex(company.domain, titles.length)],
-    companyDomain: company.domain,
-    companyName: company.name,
-  });
-
-  // Person 2 (Sales / Growth Lead / Marketing)
-  const fn2 = firstNames[(hash1 + 7) % firstNames.length];
-  const ln2 = lastNames[(hash2 + 13) % lastNames.length];
-  contacts.push({
-    firstName: fn2,
-    lastName: ln2,
-    fullName: `${fn2} ${ln2}`,
-    title: "Head of Growth",
-    companyDomain: company.domain,
-    companyName: company.name,
-  });
-
-  console.log(`[Prospeo Mock] Dynamically generated ${contacts.length} mock contacts for ${company.domain}`);
-  return contacts;
 }

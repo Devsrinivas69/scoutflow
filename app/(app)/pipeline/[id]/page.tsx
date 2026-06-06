@@ -32,7 +32,19 @@ interface PipelineStatus {
     emailsReady: number;
   };
   companies: Array<{ name: string; domain: string; industry?: string; country?: string }>;
-  contacts: Array<{ name: string; title: string; email: string | null }>;
+  contacts: Array<{
+    name: string;
+    title: string;
+    companyName: string;
+    companyDomain: string;
+    email: string | null;
+    sourceApi: string | null;
+    apiResponseId: string | null;
+    discoveryMethod: string | null;
+    selectedReason: string | null;
+    verificationStatus: string;
+    timestamp: string;
+  }>;
   campaign: {
     id: string;
     status: string;
@@ -380,6 +392,85 @@ export default function MissionView() {
                     </span>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {data.contacts.length > 0 && (
+            <div className="panel border-[var(--brand-primary)]/30">
+              <div className="panel-header bg-[rgba(226,255,61,0.02)]">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-[var(--brand-primary)] animate-pulse" />
+                  <span className="font-mono text-xs uppercase tracking-widest text-[var(--brand-primary)]">Developer Audit Panel</span>
+                </div>
+                <span className="text-[var(--brand-muted)] font-mono text-[10px]">Debugging & Traceability Mode</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[var(--brand-border)] text-[var(--brand-muted)] bg-[var(--brand-surface)]/50">
+                      <th className="p-4 uppercase tracking-wider text-[10px]">Company</th>
+                      <th className="p-4 uppercase tracking-wider text-[10px]">Contact</th>
+                      <th className="p-4 uppercase tracking-wider text-[10px]">Email & Status</th>
+                      <th className="p-4 uppercase tracking-wider text-[10px]">Telemetry</th>
+                      <th className="p-4 uppercase tracking-wider text-[10px]">Selection Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--brand-border)]">
+                    {data.contacts.map((c, i) => {
+                      const dateStr = c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : "N/A";
+                      const isVerified = c.verificationStatus === "VALID" || c.verificationStatus === "CATCH_ALL";
+                      return (
+                        <tr key={i} className="hover:bg-[var(--brand-surface-2)]/40 transition-colors">
+                          <td className="p-4">
+                            <div className="text-white font-semibold">{c.companyName || "Unknown"}</div>
+                            <div className="text-[var(--brand-muted)] text-[10px] mt-0.5">{c.companyDomain}</div>
+                          </td>
+                          <td className="p-4">
+                            <div className="text-white font-semibold">{c.name}</div>
+                            <div className="text-[var(--brand-muted)] text-[10px] mt-0.5">{c.title}</div>
+                          </td>
+                          <td className="p-4">
+                            {c.email ? (
+                              <div className="space-y-1">
+                                <div className="text-[var(--brand-text)] font-semibold">{c.email}</div>
+                                <span className={`inline-block text-[9px] px-1.5 py-0.5 rounded-sm border font-bold ${
+                                  c.verificationStatus === "VALID" ? "bg-[rgba(34,197,94,0.1)] border-green-500/30 text-green-400" :
+                                  c.verificationStatus === "CATCH_ALL" ? "bg-[rgba(245,158,11,0.1)] border-amber-500/30 text-amber-400" :
+                                  "bg-[rgba(239,68,68,0.1)] border-red-500/30 text-red-400"
+                                }`}>
+                                  {c.verificationStatus}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[var(--brand-muted)] italic text-[10px]">No email enriched</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <div className="space-y-1 text-[10px]">
+                              <div><span className="text-[var(--brand-muted)]">Source:</span> <span className="text-[var(--brand-primary)]">{c.sourceApi || "N/A"}</span></div>
+                              <div><span className="text-[var(--brand-muted)]">Method:</span> <span className="text-white">{c.discoveryMethod || "N/A"}</span></div>
+                              <div>
+                                <span className="text-[var(--brand-muted)]">ID:</span>{" "}
+                                <span className="bg-[var(--brand-surface-2)] px-1 py-0.5 rounded text-white text-[9px]">
+                                  {c.apiResponseId || "N/A"}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="text-[var(--brand-text)] max-w-[200px] whitespace-normal break-words">
+                              {c.selectedReason || "Decision maker role detected"}
+                            </div>
+                            <div className="text-[var(--brand-muted)] text-[9px] mt-1">
+                              Logged: {dateStr}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

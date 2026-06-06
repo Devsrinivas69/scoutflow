@@ -11,11 +11,13 @@ export interface VerifiedEmailResult {
   status: "VALID" | "INVALID" | "CATCH_ALL" | "UNKNOWN";
   companyDomain: string;
   companyName: string;
+  sourceApi?: string;
+  apiResponseId?: string;
+  discoveryMethod?: string;
 }
 
-/**
- * Run tasks with a concurrency limit (avoids thundering herd on external API)
- */
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function pLimit<T>(
   tasks: (() => Promise<T | null>)[],
   concurrency: number
@@ -27,14 +29,19 @@ async function pLimit<T>(
     while (i < tasks.length) {
       const idx = i++;
       try {
+        if (idx > 0) {
+          // Introduce a 1.2s delay between sequential calls to stay under rate limits
+          await sleep(1200);
+        }
         results[idx] = await tasks[idx]();
       } catch (err) {
-        console.error(`[Eazyreach] Worker error at index ${idx}:`, err);
+        console.error(`[Prospeo Enrich] Worker error at index ${idx}:`, err);
         results[idx] = null;
       }
     }
   }
 
+  // Use concurrency of 1 to process sequentially and avoid rate limits
   const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
   await Promise.all(workers);
   return results;
@@ -43,22 +50,22 @@ async function pLimit<T>(
 export async function resolveWorkEmails(
   contacts: DecisionMaker[]
 ): Promise<VerifiedEmailResult[]> {
-  const apiKey = process.env.EAZYREACH_API_KEY;
+  const apiKey = process.env.PROSPEO_API_KEY;
   if (!apiKey) {
-    console.warn("EAZYREACH_API_KEY is not set. Generating mock emails for all contacts.");
-    return contacts.map(getMockEmail);
+    console.warn("PROSPEO_API_KEY is not set. Cannot enrich emails.");
+    return [];
   }
 
-  // Run up to 5 email lookups in parallel instead of sequential
+  // Run sequentially with concurrency 1
   const tasks = contacts.map(
     (contact) => () =>
       withRetry(() => findEmail(contact, apiKey)).catch((err) => {
-        console.error(`[Eazyreach] Failed to resolve email for ${contact.fullName}:`, err);
-        return getMockEmail(contact);
+        console.error(`[Prospeo Enrich] Failed to resolve email for ${contact.fullName}:`, err);
+        return null;
       })
   );
 
-  const results = await pLimit(tasks, 5);
+  const results = await pLimit(tasks, 1);
   return results.filter((r): r is VerifiedEmailResult => r !== null);
 }
 
@@ -66,33 +73,41 @@ async function findEmail(
   contact: DecisionMaker,
   apiKey: string
 ): Promise<VerifiedEmailResult | null> {
-  const response = await fetchWithTimeout("https://api.eazyreach.io/v1/find-email", {
+  const response = await fetchWithTimeout("https://api.prospeo.io/enrich-person", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "X-KEY": apiKey,
     },
     body: JSON.stringify({
-      first_name: contact.firstName,
-      last_name: contact.lastName,
-      domain: contact.companyDomain,
+      data: {
+        first_name: contact.firstName,
+        last_name: contact.lastName,
+        company_website: contact.companyDomain,
+      },
     }),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Eazyreach API error ${response.status}: ${text}`);
+    throw new Error(`Prospeo Enrich API error ${response.status}: ${text}`);
   }
 
   const data = await response.json();
-  const email = data.email ?? data.data?.email;
-
-  if (!email) {
-    return getMockEmail(contact);
+  const person = data.person;
+  if (!person) {
+    return null;
   }
 
-  const rawStatus = (data.status ?? data.verification_status ?? "UNKNOWN") as string;
+  const emailInfo = person.email;
+  if (!emailInfo || !emailInfo.email) {
+    return null;
+  }
+
+  const rawStatus = (emailInfo.status ?? "UNKNOWN") as string;
   const status = mapStatus(rawStatus);
+
+  const personId = (person.person_id ?? person.id ?? contact.apiResponseId) as string | undefined;
 
   return {
     contactFirstName: contact.firstName,
@@ -100,10 +115,13 @@ async function findEmail(
     contactFullName: contact.fullName,
     contactTitle: contact.title,
     contactLinkedinUrl: contact.linkedinUrl,
-    email,
+    email: emailInfo.email,
     status,
     companyDomain: contact.companyDomain,
     companyName: contact.companyName,
+    sourceApi: "Prospeo",
+    apiResponseId: personId,
+    discoveryMethod: "enrich-person",
   };
 }
 
@@ -120,20 +138,4 @@ function mapStatus(raw: string): "VALID" | "INVALID" | "CATCH_ALL" | "UNKNOWN" {
     risky: "UNKNOWN",
   };
   return map[raw.toLowerCase()] ?? "UNKNOWN";
-}
-
-function getMockEmail(contact: DecisionMaker): VerifiedEmailResult {
-  const email = `${contact.firstName.toLowerCase()}.${contact.lastName.toLowerCase()}@${contact.companyDomain}`;
-  console.log(`[Eazyreach Mock] Generated email for ${contact.fullName}: ${email}`);
-  return {
-    contactFirstName: contact.firstName,
-    contactLastName: contact.lastName,
-    contactFullName: contact.fullName,
-    contactTitle: contact.title,
-    contactLinkedinUrl: contact.linkedinUrl,
-    email,
-    status: "VALID",
-    companyDomain: contact.companyDomain,
-    companyName: contact.companyName,
-  };
 }

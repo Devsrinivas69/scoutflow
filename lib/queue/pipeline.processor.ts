@@ -40,7 +40,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
     const savedCompanies = await Promise.all(
       lookalikeCompanies
-        .filter((c) => c.domain && c.domain !== seedDomain)
+        .filter((c) => c.domain)
         .map(async (c) => {
           try {
             return await prisma.company.upsert({
@@ -81,13 +81,14 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       decisionMakers.map(async (dm) => {
         const company = validCompanies.find((c) => c.domain === dm.companyDomain);
         if (!company) return null;
+        const normalizedName = dm.fullName.replace(/\s+/g, '-').toLowerCase();
         try {
           return await prisma.contact.upsert({
             where: {
               runId_linkedinUrl: {
                 runId,
                 linkedinUrl:
-                  dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`,
+                  dm.linkedinUrl ?? `prospeo-contact-${normalizedName}-${dm.companyDomain}`,
               },
             },
             create: {
@@ -98,8 +99,18 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
               fullName: dm.fullName,
               title: dm.title,
               linkedinUrl: dm.linkedinUrl,
+              sourceApi: dm.sourceApi ?? "Prospeo",
+              apiResponseId: dm.apiResponseId ?? null,
+              discoveryMethod: dm.discoveryMethod ?? "search-person",
+              selectedReason: dm.selectedReason ?? "Decision Maker match",
             },
-            update: { title: dm.title },
+            update: {
+              title: dm.title,
+              sourceApi: dm.sourceApi ?? "Prospeo",
+              apiResponseId: dm.apiResponseId ?? null,
+              discoveryMethod: dm.discoveryMethod ?? "search-person",
+              selectedReason: dm.selectedReason ?? "Decision Maker match",
+            },
           });
         } catch {
           return null;
@@ -128,6 +139,15 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         );
         if (!contact) return null;
         try {
+          // Update contact metadata with enrich telemetry
+          await prisma.contact.update({
+            where: { id: contact.id },
+            data: {
+              apiResponseId: ve.apiResponseId || contact.apiResponseId,
+              discoveryMethod: "enrich-person",
+            }
+          });
+
           return await prisma.verifiedEmail.upsert({
             where: {
               contactId_email: { contactId: contact.id, email: ve.email },
