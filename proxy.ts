@@ -3,9 +3,17 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 
 export async function proxy(request: NextRequest) {
-  const session = await auth();
-  
-  // Protect dashboard routes at the edge
+  // Wrap in try/catch so a misconfigured NEXTAUTH_URL never crashes the proxy
+  let session = null;
+  try {
+    session = await auth();
+  } catch (err) {
+    console.error("[Proxy] auth() failed — check NEXTAUTH_URL in env:", err);
+    // Allow the request through rather than crash the entire app
+    return NextResponse.next();
+  }
+
+  // Protect app routes — redirect to sign-in if not authenticated
   if (
     request.nextUrl.pathname.startsWith("/dashboard") ||
     request.nextUrl.pathname.startsWith("/pipeline") ||
@@ -34,13 +42,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico, sitemap.xml, robots.txt (metadata files)
-     */
     "/((?!api|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)",
   ],
 };
