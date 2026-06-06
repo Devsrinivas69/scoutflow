@@ -11,10 +11,12 @@ export default async function AppLayout({
   if (!session) redirect("/sign-in");
 
   return (
-    <div className="flex min-h-screen" style={{ background: "#0B1020" }}>
+    <div className="flex min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-on-surface)]">
       <Sidebar />
-      <main className="app-main flex-1">
-        {children}
+      <main className="flex-1 ml-0 md:ml-64 h-screen overflow-y-auto px-[20px] md:px-[64px] py-8 md:py-12 relative z-10">
+        <div className="max-w-[1280px] mx-auto w-full">
+          {children}
+        </div>
       </main>
     </div>
   );

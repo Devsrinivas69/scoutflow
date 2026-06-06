@@ -1,177 +1,229 @@
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
-import Link from "next/link";
-import {
-  Zap, TrendingUp, Users, Mail, GitBranch,
-  CheckCircle, Clock, AlertCircle, ArrowRight, Plus
-} from "lucide-react";
-
-async function getDashboardData(orgId: string) {
-  const [totalRuns, totalContacts, totalEmails, recentRuns, campaigns] = await Promise.all([
-    prisma.pipelineRun.count({ where: { orgId } }),
-    prisma.contact.count({ where: { run: { orgId } } }),
-    prisma.emailLog.count({ where: { campaign: { orgId } } }),
-    prisma.pipelineRun.findMany({
-      where: { orgId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-      select: {
-        id: true, seedDomain: true, status: true, currentStage: true,
-        createdAt: true, statsJson: true,
-      },
-    }),
-    prisma.campaign.findMany({
-      where: { orgId },
-      orderBy: { createdAt: "desc" },
-      take: 3,
-      select: { id: true, status: true, createdAt: true, run: { select: { seedDomain: true } } },
-    }),
-  ]);
-
-  return { totalRuns, totalContacts, totalEmails, recentRuns, campaigns };
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
-    COMPLETED: { label: "Completed", cls: "badge-success", icon: <CheckCircle className="w-3 h-3" /> },
-    RUNNING: { label: "Running", cls: "badge-warning", icon: <div className="w-2 h-2 rounded-full animate-pulse bg-amber-400" /> },
-    PENDING_APPROVAL: { label: "Awaiting Approval", cls: "badge-info", icon: <Clock className="w-3 h-3" /> },
-    FAILED: { label: "Failed", cls: "badge-error", icon: <AlertCircle className="w-3 h-3" /> },
-    CANCELLED: { label: "Cancelled", cls: "badge-muted", icon: null },
-  };
-  const s = map[status] ?? { label: status, cls: "badge-muted", icon: null };
-  return <span className={`badge ${s.cls}`}>{s.icon}{s.label}</span>;
-}
+import DomainSearch from "@/components/dashboard/DomainSearch";
+import { formatDistanceToNow } from "date-fns";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const orgId = (session?.user as { orgId?: string })?.orgId;
-  if (!orgId) return null;
+  
+  // Fetch real data from Prisma
+  const [totalProspects, activePipelines, recentRuns, emailStats] = await Promise.all([
+    prisma.contact.count(),
+    prisma.pipelineRun.count({ where: { status: { in: ["RUNNING", "PENDING", "PENDING_APPROVAL"] } } }),
+    prisma.pipelineRun.findMany({
+      where: { userId: session?.user?.id },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: {
+        _count: { select: { contacts: true } },
+      },
+    }),
+    prisma.emailLog.groupBy({
+      by: ['status'],
+      _count: true,
+    }),
+  ]);
 
-  const { totalRuns, totalContacts, totalEmails, recentRuns } =
-    await getDashboardData(orgId);
-
-  const metrics = [
-    { label: "Pipeline Runs", value: totalRuns, icon: GitBranch, color: "#6D5DF6", trend: "+12%" },
-    { label: "Prospects Found", value: totalContacts, icon: Users, color: "#8B7CFF", trend: "+28%" },
-    { label: "Emails Sent", value: totalEmails, icon: Mail, color: "#00C896", trend: "+15%" },
-    { label: "Avg Response Rate", value: "8.4%", icon: TrendingUp, color: "#FFB547", trend: "+2%" },
-  ];
+  // Calculate reply rate
+  let totalSent = 0;
+  let totalReplied = 0;
+  emailStats.forEach((stat: any) => {
+    if (['SENT', 'DELIVERED', 'OPENED', 'REPLIED'].includes(stat.status)) totalSent += stat._count;
+    if (stat.status === 'REPLIED') totalReplied += stat._count;
+  });
+  const replyRate = totalSent > 0 ? ((totalReplied / totalSent) * 100).toFixed(1) : "0.0";
 
   return (
-    <div className="p-8">
+    <>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <header className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: "#E8EAF6" }}>Dashboard</h1>
-          <p className="text-sm mt-1" style={{ color: "#6B7BA4" }}>
-            Welcome back, {session?.user?.name?.split(" ")[0] ?? "there"} 👋
+          <h2 className="font-headline-lg text-display-lg-mobile md:text-headline-lg text-[var(--color-on-surface)] tracking-tight mb-2">
+            Welcome back, Agent.
+          </h2>
+          <p className="font-body-md text-body-md text-[var(--color-on-surface-variant)]">
+            System operations normal. Ready for new instructions.
           </p>
         </div>
-        <Link href="/pipeline">
-          <button className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            New Pipeline Run
-          </button>
-        </Link>
-      </div>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
-        {metrics.map((m) => {
-          const Icon = m.icon;
-          return (
-            <div key={m.label} className="metric-card">
-              <div className="flex items-center justify-between mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ background: `${m.color}22` }}>
-                  <Icon className="w-5 h-5" style={{ color: m.color }} />
-                </div>
-                <span className="text-xs font-semibold px-2 py-1 rounded-full"
-                  style={{ background: "rgba(0,200,150,0.1)", color: "#00C896" }}>
-                  {m.trend}
-                </span>
-              </div>
-              <div className="text-3xl font-black mb-1" style={{ color: "#E8EAF6" }}>
-                {typeof m.value === "number" ? m.value.toLocaleString() : m.value}
-              </div>
-              <div className="text-sm" style={{ color: "#6B7BA4" }}>{m.label}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Recent Pipeline Runs */}
-      <div className="rounded-2xl overflow-hidden mb-6"
-        style={{ background: "rgba(18,25,43,0.7)", border: "1px solid rgba(109,93,246,0.15)" }}>
-        <div className="flex items-center justify-between px-6 py-4 border-b"
-          style={{ borderColor: "rgba(109,93,246,0.15)" }}>
-          <h2 className="font-semibold" style={{ color: "#E8EAF6" }}>Recent Pipeline Runs</h2>
-          <Link href="/pipeline" className="flex items-center gap-1 text-sm" style={{ color: "#6D5DF6" }}>
-            View all <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-        {recentRuns.length === 0 ? (
-          <div className="py-16 text-center">
-            <Zap className="w-10 h-10 mx-auto mb-3" style={{ color: "rgba(109,93,246,0.3)" }} />
-            <p className="font-medium" style={{ color: "#E8EAF6" }}>No pipeline runs yet</p>
-            <p className="text-sm mt-1 mb-4" style={{ color: "#6B7BA4" }}>
-              Enter a company domain to start your first run
-            </p>
-            <Link href="/pipeline">
-              <button className="btn-primary">Launch First Pipeline</button>
-            </Link>
+        <div className="hidden sm:flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-[var(--color-surface-container-high)] px-3 py-1.5 rounded-full border border-[var(--color-border-subtle)]">
+            <div className="w-2 h-2 rounded-full bg-[var(--color-primary)] ai-aura"></div>
+            <span className="font-mono-data text-mono-data text-[var(--color-primary)]">AI Active</span>
           </div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Domain</th>
-                <th>Status</th>
-                <th>Stage</th>
-                <th>Companies</th>
-                <th>Contacts</th>
-                <th>Date</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentRuns.map((run) => {
-                const stats = (run.statsJson as Record<string, number>) ?? {};
-                return (
-                  <tr key={run.id}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                          style={{ background: "rgba(109,93,246,0.1)" }}>
-                          <GitBranch className="w-4 h-4" style={{ color: "#6D5DF6" }} />
-                        </div>
-                        <span className="font-medium" style={{ color: "#E8EAF6" }}>{run.seedDomain}</span>
-                      </div>
-                    </td>
-                    <td><StatusBadge status={run.status} /></td>
-                    <td><span style={{ color: "#6B7BA4" }}>{run.currentStage}/4</span></td>
-                    <td><span style={{ color: "#E8EAF6" }}>{stats.companiesFound ?? "—"}</span></td>
-                    <td><span style={{ color: "#E8EAF6" }}>{stats.contactsFound ?? "—"}</span></td>
-                    <td>
-                      <span style={{ color: "#6B7BA4" }} className="text-sm">
-                        {new Date(run.createdAt).toLocaleDateString()}
-                      </span>
-                    </td>
-                    <td>
-                      <Link href={`/pipeline/${run.id}`}>
-                        <button className="flex items-center gap-1 text-sm" style={{ color: "#6D5DF6" }}>
-                          View <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </Link>
-                    </td>
+          <div className="w-10 h-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-border-subtle)] overflow-hidden relative">
+            <div className="absolute inset-0 bg-gradient-to-tr from-[var(--color-primary)]/20 to-transparent"></div>
+            <span className="material-symbols-outlined absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-[var(--color-on-surface-variant)]">person</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Domain Input Section (Hero) */}
+      <section className="mb-12 relative">
+        <div className="absolute -inset-4 bg-[var(--color-primary)]/5 blur-3xl rounded-[3rem] -z-10"></div>
+        <div className="glass-card rounded-2xl p-8 relative overflow-hidden">
+          <div 
+            className="absolute inset-0 opacity-[0.03] pointer-events-none" 
+            style={{ backgroundImage: "radial-gradient(var(--color-primary) 1px, transparent 1px)", backgroundSize: "24px 24px" }}
+          ></div>
+          <DomainSearch />
+        </div>
+      </section>
+
+      {/* Bento Grid Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-12">
+        {/* Left Column: Metrics & Pipeline */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* Metrics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="glass-card p-6 rounded-xl relative group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <span className="material-symbols-outlined text-4xl text-[var(--color-primary)]">groups</span>
+              </div>
+              <p className="font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase tracking-wider mb-2">Total Prospects</p>
+              <div className="flex items-baseline gap-2">
+                <h4 className="font-display-lg-mobile text-[32px] font-bold text-[var(--color-on-surface)]">{totalProspects}</h4>
+              </div>
+            </div>
+
+            <div className="glass-card p-6 rounded-xl relative group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <span className="material-symbols-outlined text-4xl text-[var(--color-primary)]">mark_email_read</span>
+              </div>
+              <p className="font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase tracking-wider mb-2">Reply Rate</p>
+              <div className="flex items-baseline gap-2">
+                <h4 className="font-display-lg-mobile text-[32px] font-bold text-[var(--color-on-surface)]">{replyRate}%</h4>
+              </div>
+            </div>
+
+            <div className="glass-card p-6 rounded-xl relative group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <span className="material-symbols-outlined text-4xl text-[var(--color-primary)]">schedule</span>
+              </div>
+              <p className="font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase tracking-wider mb-2">Active Pipelines</p>
+              <div className="flex items-baseline gap-2">
+                <h4 className="font-display-lg-mobile text-[32px] font-bold text-[var(--color-on-surface)]">{activePipelines}</h4>
+                <span className="font-label-md text-label-md text-[var(--color-on-surface-variant)]">Running</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Pipelines Table */}
+          <div className="glass-card rounded-xl overflow-hidden flex-1 flex flex-col">
+            <div className="p-6 border-b border-[var(--color-border-subtle)] flex justify-between items-center bg-[var(--color-surface-dim)]/30">
+              <h3 className="font-headline-md text-headline-md text-[var(--color-on-surface)] text-[20px]">Recent Pipeline Runs</h3>
+              <a href="/pipeline" className="text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-label-sm text-label-sm uppercase tracking-wider transition-colors">View All</a>
+            </div>
+            <div className="flex-1 overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-[var(--color-border-subtle)]/50">
+                    <th className="px-6 py-4 font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase opacity-70">Target</th>
+                    <th className="px-6 py-4 font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase opacity-70">Status</th>
+                    <th className="px-6 py-4 font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase opacity-70">Discovered</th>
+                    <th className="px-6 py-4 font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase opacity-70 text-right">Time</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border-subtle)]/30">
+                  {recentRuns.map((run: any) => (
+                    <tr key={run.id} className="hover:bg-[var(--color-surface-container-high)]/50 transition-colors group">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded bg-[var(--color-surface-container-high)] flex items-center justify-center border border-[var(--color-border-subtle)]">
+                            <span className="material-symbols-outlined text-[16px] text-[var(--color-primary)]">domain</span>
+                          </div>
+                          <a href={`/pipeline/${run.id}`} className="font-mono-data text-mono-data text-[var(--color-on-surface)] hover:underline">
+                            {run.seedDomain}
+                          </a>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {run.status === "RUNNING" || run.status === "PENDING" ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/20">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)] ai-aura"></div>
+                            <span className="font-label-sm text-[10px] text-[var(--color-primary)] uppercase">Scanning</span>
+                          </div>
+                        ) : run.status === "COMPLETED" ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-surface-variant)] border border-[var(--color-outline-variant)]">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-outline)]"></div>
+                            <span className="font-label-sm text-[10px] text-[var(--color-outline)] uppercase">Completed</span>
+                          </div>
+                        ) : run.status === "PENDING_APPROVAL" ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-tertiary-container)]/20 border border-[var(--color-tertiary)]/30">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-tertiary)] animate-pulse"></div>
+                            <span className="font-label-sm text-[10px] text-[var(--color-tertiary)] uppercase">Needs Approval</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-error)]/10 border border-[var(--color-error)]/20">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-error)]"></div>
+                            <span className="font-label-sm text-[10px] text-[var(--color-error)] uppercase">Failed</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 font-mono-data text-mono-data text-[var(--color-on-surface)]">
+                        {run._count.contacts > 0 ? run._count.contacts : "--"}
+                      </td>
+                      <td className="px-6 py-4 font-mono-data text-mono-data text-[var(--color-on-surface-variant)] text-right">
+                        {formatDistanceToNow(run.createdAt, { addSuffix: true })}
+                      </td>
+                    </tr>
+                  ))}
+                  {recentRuns.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-[var(--color-on-surface-variant)] font-mono-data text-sm">
+                        No pipelines found. Start your first scan above.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Activity Feed */}
+        <div className="lg:col-span-4 glass-card rounded-xl flex flex-col h-[600px] lg:h-auto">
+          <div className="p-6 border-b border-[var(--color-border-subtle)] flex justify-between items-center bg-[var(--color-surface-dim)]/30">
+            <h3 className="font-headline-md text-headline-md text-[var(--color-on-surface)] text-[20px] flex items-center gap-2">
+              <span className="material-symbols-outlined text-[var(--color-primary)]">memory</span>
+              Agent Activity
+            </h3>
+          </div>
+          <div className="flex-1 p-6 overflow-y-auto space-y-6">
+            
+            <div className="relative pl-6">
+              <div className="absolute left-[11px] top-8 bottom-[-24px] w-px bg-[var(--color-border-subtle)]"></div>
+              <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-center z-10">
+                <div className="w-2 h-2 rounded-full bg-[var(--color-primary)] ai-aura"></div>
+              </div>
+              <div className="bg-[var(--color-surface-container-high)]/50 border border-[var(--color-border-subtle)] rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="font-label-sm text-label-sm text-[var(--color-primary)] uppercase">Scraping Logic</span>
+                  <span className="font-mono-data text-mono-data text-[12px] text-[var(--color-on-surface-variant)]">Just now</span>
+                </div>
+                <p className="font-body-md text-body-md text-[var(--color-on-surface)] text-sm">Monitoring pipeline events in real-time. Connecting to Ocean.io stream...</p>
+              </div>
+            </div>
+
+            <div className="relative pl-6">
+              <div className="absolute left-[11px] top-8 bottom-[-24px] w-px bg-[var(--color-border-subtle)]"></div>
+              <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-[var(--color-surface-variant)] border border-[var(--color-outline-variant)] flex items-center justify-center z-10">
+                <span className="material-symbols-outlined text-[14px] text-[var(--color-outline)]">mark_email_read</span>
+              </div>
+              <div className="bg-[var(--color-surface-container-low)] border border-[var(--color-border-subtle)]/50 rounded-lg p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="font-label-sm text-label-sm text-[var(--color-on-surface-variant)] uppercase">System Boot</span>
+                  <span className="font-mono-data text-mono-data text-[12px] text-[var(--color-on-surface-variant)]">Startup</span>
+                </div>
+                <p className="font-body-md text-body-md text-[var(--color-on-surface)] text-sm">Auth protocols verified. Database connections established.</p>
+              </div>
+            </div>
+
+          </div>
+          <div className="p-4 bg-[var(--color-surface-dim)] border-t border-[var(--color-border-subtle)] rounded-b-xl flex items-center gap-2 font-mono-data text-mono-data text-xs text-[var(--color-on-surface-variant)]">
+            <span className="text-[var(--color-primary)] animate-pulse">_</span> waiting for new events...
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
