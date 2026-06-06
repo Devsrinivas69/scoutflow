@@ -21,7 +21,7 @@ export async function GET(
         contacts: {
           orderBy: { createdAt: "asc" },
           take: 50,
-          include: { verifiedEmails: true, company: true },
+          include: { verifiedEmails: true },
         },
         campaigns: {
           orderBy: { createdAt: "desc" },
@@ -81,18 +81,10 @@ export async function GET(
         industry: c.industry,
         country: c.country,
       })),
-      contacts: run.contacts.slice(0, 50).map((c) => ({
+      contacts: run.contacts.slice(0, 10).map((c) => ({
         name: c.fullName,
         title: c.title,
-        companyName: c.company.name,
-        companyDomain: c.company.domain,
         email: c.verifiedEmails[0]?.email ?? null,
-        sourceApi: c.sourceApi,
-        apiResponseId: c.apiResponseId,
-        discoveryMethod: c.discoveryMethod,
-        selectedReason: c.selectedReason,
-        verificationStatus: c.verifiedEmails[0]?.status ?? "UNKNOWN",
-        timestamp: c.createdAt,
       })),
       campaign: campaign
         ? {

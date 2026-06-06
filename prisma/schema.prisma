@@ -149,10 +149,6 @@ model Contact {
   fullName      String?
   title         String?
   linkedinUrl   String?
-  sourceApi     String?        @default("Prospeo")
-  apiResponseId String?
-  discoveryMethod String?      @default("search-person")
-  selectedReason  String?
   verifiedEmails VerifiedEmail[]
   emailLogs     EmailLog[]
   createdAt     DateTime       @default(now())
