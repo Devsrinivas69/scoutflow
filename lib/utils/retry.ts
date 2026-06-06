@@ -43,3 +43,18 @@ export async function withRetry<T>(
 
   throw new Error("Max retry attempts reached");
 }
+
+export async function fetchWithTimeout(
+  resource: RequestInfo,
+  options: RequestInit & { timeoutMs?: number } = {}
+) {
+  const { timeoutMs = 10000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const response = await fetch(resource, {
+    ...fetchOptions,
+    signal: controller.signal,
+  });
+  clearTimeout(id);
+  return response;
+}

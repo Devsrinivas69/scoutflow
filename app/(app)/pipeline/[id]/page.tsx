@@ -39,13 +39,13 @@ const STAGES = [
   { num: 4, icon: Mail, label: "Outreach", desc: "Brevo" },
 ];
 
-function ApprovalCheckpoint({
-  data, onApprove, onCancel
-}: {
+import dynamic from 'next/dynamic';
+
+const ApprovalCheckpoint = dynamic(() => Promise.resolve(({ data, onApprove, onCancel }: {
   data: PipelineStatus;
   onApprove: (subject: string, body: string) => void;
   onCancel: () => void;
-}) {
+}) => {
   const [subjectTemplate, setSubjectTemplate] = useState(data.campaign?.subjectTemplate ?? "");
   const [bodyTemplate, setBodyTemplate] = useState(data.campaign?.bodyTemplate ?? "");
   const [editing, setEditing] = useState(false);
@@ -157,40 +157,34 @@ function ApprovalCheckpoint({
       </motion.div>
     </div>
   );
-}
+}), { ssr: false, loading: () => null });
+
+import useSWR from "swr";
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function MissionView() {
   const params = useParams();
   const runId = params.id as string;
 
-  const [data, setData] = useState<PipelineStatus | null>(null);
   const [showApproval, setShowApproval] = useState(false);
   const [sendResult, setSendResult] = useState<{ sent: number; failed: number } | null>(null);
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/pipeline/${runId}/status`);
-      if (res.ok) {
-        const d: PipelineStatus = await res.json();
-        setData(d);
+  const { data, mutate } = useSWR<PipelineStatus>(
+    `/api/pipeline/${runId}/status`,
+    fetcher,
+    {
+      refreshInterval: (currentData) => {
+        if (!currentData) return 2000;
+        return currentData.status === "RUNNING" || currentData.status === "PENDING" ? 2000 : 0;
+      },
+      onSuccess: (d) => {
         if (d.status === "PENDING_APPROVAL" && !showApproval && !sendResult) {
           setShowApproval(true);
         }
       }
-    } catch {
-      // silent
     }
-  }, [runId, showApproval, sendResult]);
-
-  useEffect(() => {
-    fetchStatus();
-    const id = setInterval(() => {
-      if (data?.status === "RUNNING" || data?.status === "PENDING" || !data) {
-        fetchStatus();
-      }
-    }, 2000);
-    return () => clearInterval(id);
-  }, [fetchStatus, data?.status]);
+  );
 
   const handleApprove = async (subjectTemplate: string, bodyTemplate: string) => {
     const res = await fetch(`/api/pipeline/${runId}/approve`, {
@@ -202,7 +196,7 @@ export default function MissionView() {
     if (res.ok) {
       setShowApproval(false);
       setSendResult({ sent: result.sentCount, failed: result.failedCount });
-      fetchStatus();
+      mutate();
     }
   };
 

@@ -1,4 +1,4 @@
-import { withRetry } from "@/lib/utils/retry";
+import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
 
 export interface LookalikeCompany {
   name: string;
@@ -17,7 +17,7 @@ export async function findLookalikeCompanies(
     const apiKey = process.env.OCEAN_API_KEY;
     if (!apiKey) throw new Error("OCEAN_API_KEY is not set");
 
-    const response = await fetch("https://api.ocean.io/v1/lookalikes", {
+    const response = await fetchWithTimeout("https://api.ocean.io/v1/lookalikes", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

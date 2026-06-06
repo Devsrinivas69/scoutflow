@@ -1,4 +1,4 @@
-import { withRetry } from "@/lib/utils/retry";
+import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
 import type { DecisionMaker } from "./prospeo.service";
 
 export interface VerifiedEmailResult {
@@ -42,7 +42,7 @@ async function findEmail(
   contact: DecisionMaker,
   apiKey: string
 ): Promise<VerifiedEmailResult | null> {
-  const response = await fetch("https://api.eazyreach.io/v1/find-email", {
+  const response = await fetchWithTimeout("https://api.eazyreach.io/v1/find-email", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

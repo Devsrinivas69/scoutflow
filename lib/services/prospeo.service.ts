@@ -1,4 +1,4 @@
-import { withRetry } from "@/lib/utils/retry";
+import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
 import type { LookalikeCompany } from "./ocean.service";
 
 export interface DecisionMaker {
@@ -41,7 +41,7 @@ async function searchCompanyContacts(
   company: LookalikeCompany,
   apiKey: string
 ): Promise<DecisionMaker[]> {
-  const response = await fetch("https://api.prospeo.io/domain-search", {
+  const response = await fetchWithTimeout("https://api.prospeo.io/domain-search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
