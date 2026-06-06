@@ -43,6 +43,22 @@ export async function GET(
     const stats = (run.statsJson as Record<string, number>) ?? {};
     const campaign = run.campaigns[0] ?? null;
 
+    let sentCount = 0;
+    let failedCount = 0;
+
+    if (campaign) {
+      const emailLogsCount = await prisma.emailLog.groupBy({
+        by: ["status"],
+        where: { campaignId: campaign.id },
+        _count: true,
+      });
+
+      emailLogsCount.forEach((c) => {
+        if (c.status === "SENT") sentCount = c._count;
+        if (c.status === "FAILED") failedCount = c._count;
+      });
+    }
+
     return NextResponse.json({
       id: run.id,
       seedDomain: run.seedDomain,
@@ -77,6 +93,8 @@ export async function GET(
             subjectTemplate: campaign.subjectTemplate,
             bodyTemplate: campaign.bodyTemplate,
             emailsJson: campaign.emailsJson,
+            sentCount,
+            failedCount,
           }
         : null,
     });

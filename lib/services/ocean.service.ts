@@ -73,18 +73,26 @@ export async function findLookalikeCompanies(
 
 // Fallback mock data for development/testing
 function getMockLookalikeCompanies(seedDomain: string): LookalikeCompany[] {
-  const mockCompanies = [
-    { name: "Braintree", domain: "braintreepayments.com", industry: "Fintech", headcount: "500-1000", country: "US" },
-    { name: "Adyen", domain: "adyen.com", industry: "Fintech", headcount: "2000-5000", country: "NL" },
-    { name: "Square", domain: "squareup.com", industry: "Fintech", headcount: "5000+", country: "US" },
-    { name: "Checkout.com", domain: "checkout.com", industry: "Fintech", headcount: "1000-2000", country: "UK" },
-    { name: "Klarna", domain: "klarna.com", industry: "Fintech", headcount: "2000-5000", country: "SE" },
-    { name: "Mollie", domain: "mollie.com", industry: "Fintech", headcount: "500-1000", country: "NL" },
-    { name: "Payoneer", domain: "payoneer.com", industry: "Fintech", headcount: "1000-2000", country: "US" },
-    { name: "Wise", domain: "wise.com", industry: "Fintech", headcount: "2000-5000", country: "UK" },
-    { name: "Revolut", domain: "revolut.com", industry: "Fintech", headcount: "5000+", country: "UK" },
-    { name: "Affirm", domain: "affirm.com", industry: "Fintech", headcount: "1000-2000", country: "US" },
+  const parts = seedDomain.split(".");
+  const namePart = parts[0];
+  const capitalized = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+
+  const suffixes = [
+    { suffix: " Solutions", domainSuffix: "-solutions.com", industry: "Enterprise Software" },
+    { suffix: " Labs", domainSuffix: "-labs.com", industry: "AI & Research" },
+    { suffix: " Technologies", domainSuffix: "-tech.com", industry: "SaaS Platforms" },
+    { suffix: " Ventures", domainSuffix: "-ventures.com", industry: "Cloud Infrastructure" },
+    { suffix: " Systems", domainSuffix: "-systems.com", industry: "Data Analytics" },
   ];
-  console.log(`[Ocean.io Mock] Returning ${mockCompanies.length} lookalike companies for seed: ${seedDomain}`);
+
+  const mockCompanies = suffixes.map((s, i) => ({
+    name: `${capitalized}${s.suffix}`,
+    domain: `${namePart}${s.domainSuffix}`,
+    industry: s.industry,
+    headcount: `${100 + i * 150}-${250 + i * 300}`,
+    country: ["US", "UK", "NL", "DE", "CA"][i % 5],
+  }));
+
+  console.log(`[Ocean.io Mock] Dynamically generated ${mockCompanies.length} lookalike companies for seed: ${seedDomain}`);
   return mockCompanies;
 }

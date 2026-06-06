@@ -39,6 +39,8 @@ interface PipelineStatus {
     subjectTemplate: string;
     bodyTemplate: string;
     emailsJson: Array<{ email: string; name: string; subject: string; body: string }>;
+    sentCount?: number;
+    failedCount?: number;
   } | null;
 }
 
@@ -55,7 +57,6 @@ export default function MissionView() {
   const runId = params.id as string;
 
   const [showApproval, setShowApproval] = useState(false);
-  const [sendResult, setSendResult] = useState<{ sent: number; failed: number } | null>(null);
 
   const { data, error, mutate } = useSWR<PipelineStatus>(
     `/api/pipeline/${runId}/status`,
@@ -66,7 +67,7 @@ export default function MissionView() {
         return currentData.status === "RUNNING" || currentData.status === "PENDING" ? 2000 : 0;
       },
       onSuccess: (d) => {
-        if (d.status === "PENDING_APPROVAL" && !showApproval && !sendResult) {
+        if (d.status === "PENDING_APPROVAL" && d.campaign?.status === "PENDING_APPROVAL" && !showApproval) {
           setShowApproval(true);
         }
       },
@@ -80,10 +81,8 @@ export default function MissionView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ subjectTemplate, bodyTemplate }),
       });
-      const result = await res.json();
       if (res.ok) {
         setShowApproval(false);
-        setSendResult({ sent: result.sentCount, failed: result.failedCount });
         mutate();
       }
     } catch (err) {
@@ -172,10 +171,10 @@ export default function MissionView() {
       </div>
 
       {/* Horizontal Pipeline Journey */}
-      <div className="mb-24 relative px-4">
-        <div className="absolute top-6 left-0 right-0 h-px bg-[var(--brand-border)] z-0" />
+      <div className="mb-24 relative px-4 overflow-x-auto scrollbar-hide">
+        <div className="absolute top-6 left-0 right-0 h-px bg-[var(--brand-border)] z-0 min-w-[640px]" />
 
-        <div className="flex justify-between relative z-10">
+        <div className="flex justify-between relative z-10 min-w-[640px] md:min-w-0">
           {STAGES.map((stage, i) => {
             const Icon = stage.icon;
             let state: "pending" | "active" | "done" | "error" = "pending";
@@ -266,25 +265,75 @@ export default function MissionView() {
             </motion.div>
           </div>
         </div>
-
         {/* Right Column: Feeds */}
         <div className="lg:col-span-8 space-y-8">
-          {sendResult && (
-            <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="panel border-[var(--brand-success)] bg-[#000]">
-              <div className="panel-header bg-[rgba(226,255,61,0.05)]">
+          {/* Real-time Email Campaign Progress Banner */}
+          {data.campaign && ["SENDING", "SENT", "FAILED"].includes(data.campaign.status) && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`panel bg-[#000] ${
+                data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
+                  ? "border-[var(--brand-error)]"
+                  : data.campaign.status === "SENDING"
+                  ? "border-[var(--brand-warning)]"
+                  : "border-[var(--brand-success)]"
+              }`}
+            >
+              <div
+                className={`panel-header ${
+                  data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
+                    ? "bg-[rgba(239,68,68,0.05)]"
+                    : data.campaign.status === "SENDING"
+                    ? "bg-[rgba(245,158,11,0.05)]"
+                    : "bg-[rgba(226,255,61,0.05)]"
+                }`}
+              >
                 <div className="flex items-center gap-3">
-                  <CheckCircle className="w-5 h-5 text-[var(--brand-success)]" />
-                  <span className="font-mono text-sm uppercase text-[var(--brand-success)]">Mission Accomplished</span>
+                  {data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
+                    <AlertCircle className="w-5 h-5 text-[var(--brand-error)]" />
+                  ) : data.campaign.status === "SENDING" ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-[var(--brand-warning)]" />
+                  ) : (
+                    <CheckCircle className="w-5 h-5 text-[var(--brand-success)]" />
+                  )}
+                  <span
+                    className={`font-mono text-sm uppercase ${
+                      data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
+                        ? "text-[var(--brand-error)]"
+                        : data.campaign.status === "SENDING"
+                        ? "text-[var(--brand-warning)]"
+                        : "text-[var(--brand-success)]"
+                    }`}
+                  >
+                    {data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
+                      ? "Delivery Failed"
+                      : data.campaign.status === "SENDING"
+                      ? "Delivering Payload..."
+                      : "Mission Accomplished"}
+                  </span>
                 </div>
               </div>
-              <div className="p-6">
-                <p className="text-[var(--brand-text)] font-mono text-sm">
-                  Payload successfully delivered to {sendResult.sent} targets.
-                </p>
-                {sendResult.failed > 0 && (
-                  <p className="text-[var(--brand-error)] font-mono text-sm mt-2">
-                    {sendResult.failed} deliveries failed.
+              <div className="p-6 font-mono text-sm space-y-2">
+                {data.campaign.status === "SENDING" ? (
+                  <p className="text-[var(--brand-text)]">
+                    Sending outreach emails in background. Progress: {data.campaign.sentCount ?? 0} sent, {data.campaign.failedCount ?? 0} failed (out of {data.campaign.emailsJson.length} total).
                   </p>
+                ) : data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
+                  <p className="text-[var(--brand-error)]">
+                    All deliveries failed. Please check your Brevo API key configuration and verified sender details in environment variables.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-[var(--brand-text)]">
+                      Outreach payload successfully delivered to {data.campaign.sentCount ?? 0} target(s).
+                    </p>
+                    {(data.campaign.failedCount ?? 0) > 0 && (
+                      <p className="text-[var(--brand-error)]">
+                        {data.campaign.failedCount} delivery attempt(s) failed.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
             </motion.div>

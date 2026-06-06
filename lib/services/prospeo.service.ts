@@ -59,20 +59,29 @@ async function searchCompanyContacts(
   company: LookalikeCompany,
   apiKey: string
 ): Promise<DecisionMaker[]> {
-  const response = await fetchWithTimeout("https://api.prospeo.io/domain-search", {
+  const response = await fetchWithTimeout("https://api.prospeo.io/search-person", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-KEY": apiKey,
     },
     body: JSON.stringify({
-      company: company.domain,
+      filters: {
+        company: {
+          websites: {
+            include: [company.domain]
+          }
+        },
+        person_title: {
+          include: [
+            "CEO", "CTO", "CMO", "COO", "CFO",
+            "VP Sales", "VP Marketing", "Head of Sales",
+            "Director of Sales", "Founder", "Co-Founder",
+            "VP of Sales", "Head of Growth", "Director of Marketing"
+          ]
+        }
+      },
       limit: 10,
-      job_titles: [
-        "CEO", "CTO", "CMO", "COO", "CFO",
-        "VP Sales", "VP Marketing", "Head of Sales",
-        "Director of Sales", "Founder", "Co-Founder",
-      ],
     }),
   });
 
@@ -88,14 +97,15 @@ async function searchCompanyContacts(
     return getMockDecisionMakers(company);
   }
 
-  return results.map((p: Record<string, unknown>) => {
+  return results.map((item: any) => {
+    const p = item.person ?? item ?? {};
     const firstName = (p.first_name ?? p.firstName ?? "") as string;
     const lastName = (p.last_name ?? p.lastName ?? "") as string;
     return {
       firstName,
       lastName,
       fullName: `${firstName} ${lastName}`.trim() || (p.full_name as string) || "",
-      title: (p.job_title ?? p.title ?? p.position ?? "Decision Maker") as string,
+      title: (p.current_job_title ?? p.job_title ?? p.title ?? p.position ?? "Decision Maker") as string,
       linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
       companyDomain: company.domain,
       companyName: company.name,
@@ -103,21 +113,48 @@ async function searchCompanyContacts(
   });
 }
 
-function getMockDecisionMakers(company: LookalikeCompany): DecisionMaker[] {
-  const mockTitles = ["VP of Sales", "Head of Growth", "Director of Marketing", "CEO"];
-  const mockNames = [
-    { first: "Sarah", last: "Chen" },
-    { first: "Marcus", last: "Johnson" },
-    { first: "Priya", last: "Patel" },
-  ];
+function getDeterministicIndex(str: string, max: number): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % max;
+}
 
-  console.log(`[Prospeo Mock] Generating mock contacts for ${company.domain}`);
-  return mockNames.slice(0, 2).map((name, i) => ({
-    firstName: name.first,
-    lastName: name.last,
-    fullName: `${name.first} ${name.last}`,
-    title: mockTitles[i % mockTitles.length],
+function getMockDecisionMakers(company: LookalikeCompany): DecisionMaker[] {
+  const firstNames = ["John", "Sarah", "David", "Emma", "Michael", "Olivia", "James", "Sophia", "Robert", "Isabella", "William", "Mia", "Joseph", "Charlotte", "Daniel", "Amelia", "Thomas", "Harper", "Charles", "Evelyn"];
+  const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
+  const titles = ["CEO", "CTO", "VP of Sales", "Head of Growth", "Director of Marketing", "COO"];
+
+  const hash1 = getDeterministicIndex(company.domain, firstNames.length);
+  const hash2 = getDeterministicIndex(company.domain + "alt", lastNames.length);
+
+  const contacts: DecisionMaker[] = [];
+  
+  // Person 1 (CEO / CTO / Founder)
+  const fn1 = firstNames[hash1];
+  const ln1 = lastNames[hash2];
+  contacts.push({
+    firstName: fn1,
+    lastName: ln1,
+    fullName: `${fn1} ${ln1}`,
+    title: titles[getDeterministicIndex(company.domain, titles.length)],
     companyDomain: company.domain,
     companyName: company.name,
-  }));
+  });
+
+  // Person 2 (Sales / Growth Lead / Marketing)
+  const fn2 = firstNames[(hash1 + 7) % firstNames.length];
+  const ln2 = lastNames[(hash2 + 13) % lastNames.length];
+  contacts.push({
+    firstName: fn2,
+    lastName: ln2,
+    fullName: `${fn2} ${ln2}`,
+    title: "Head of Growth",
+    companyDomain: company.domain,
+    companyName: company.name,
+  });
+
+  console.log(`[Prospeo Mock] Dynamically generated ${contacts.length} mock contacts for ${company.domain}`);
+  return contacts;
 }

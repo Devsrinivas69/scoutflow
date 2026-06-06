@@ -13,7 +13,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen overflow-hidden bg-[var(--color-background)] text-[var(--color-on-surface)]">
       <Sidebar />
-      <main className="flex-1 ml-0 md:ml-64 h-screen overflow-y-auto px-[20px] md:px-[64px] py-8 md:py-12 relative z-10">
+      <main className="flex-1 ml-0 md:ml-64 h-screen overflow-y-auto px-[20px] md:px-[64px] pt-24 pb-8 md:py-12 relative z-10">
         <div className="max-w-[1280px] mx-auto w-full">
           {children}
         </div>
