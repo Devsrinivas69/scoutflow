@@ -1,5 +1,6 @@
 import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
 import type { LookalikeCompany } from "./ocean.service";
+import { getCached, setCached } from "@/lib/redis/cache";
 
 export interface DecisionMaker {
   firstName: string;
@@ -42,16 +43,18 @@ export async function findDecisionMakers(
     return companies.flatMap(getMockDecisionMakers);
   }
 
-  // Run up to 5 company lookups in parallel instead of sequential
+  // Run sequentially (concurrency 1) with a 500ms delay to respect Prospeo API rate limits
   const tasks = companies.map(
-    (company) => () =>
-      withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
+    (company) => async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
         console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
         return getMockDecisionMakers(company);
-      })
+      });
+    }
   );
 
-  const results = await pLimit(tasks, 5);
+  const results = await pLimit(tasks, 1);
   return results.flat();
 }
 
@@ -59,6 +62,13 @@ async function searchCompanyContacts(
   company: LookalikeCompany,
   apiKey: string
 ): Promise<DecisionMaker[]> {
+  const cacheKey = `prospeo:contacts:${company.domain}`;
+  const cached = await getCached<DecisionMaker[]>(cacheKey);
+  if (cached) {
+    console.log(`[Redis Cache] Hit for Prospeo contacts of domain: ${company.domain}`);
+    return cached;
+  }
+
   const response = await fetchWithTimeout("https://api.prospeo.io/search-person", {
     method: "POST",
     headers: {
@@ -94,10 +104,12 @@ async function searchCompanyContacts(
   const results = data.response ?? data.results ?? data.contacts ?? [];
 
   if (results.length === 0) {
-    return getMockDecisionMakers(company);
+    const mockContacts = getMockDecisionMakers(company);
+    await setCached(cacheKey, mockContacts, 86400);
+    return mockContacts;
   }
 
-  return results.map((item: any) => {
+  const contacts = results.map((item: any) => {
     const p = item.person ?? item ?? {};
     const firstName = (p.first_name ?? p.firstName ?? "") as string;
     const lastName = (p.last_name ?? p.lastName ?? "") as string;
@@ -111,6 +123,9 @@ async function searchCompanyContacts(
       companyName: company.name,
     };
   });
+
+  await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
+  return contacts;
 }
 
 function getDeterministicIndex(str: string, max: number): number {

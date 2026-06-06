@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
 import { findDecisionMakers } from "@/lib/services/prospeo.service";
 import { resolveWorkEmails } from "@/lib/services/apollo.service";
+import { withRetry } from "@/lib/utils/retry";
 import {
   generateSubject,
   generateBody,
@@ -18,137 +19,245 @@ import {
 import type { PipelineJobData } from "./pipeline.queue";
 
 async function updateStage(runId: string, stage: number, status?: string) {
-  await prisma.pipelineRun.update({
-    where: { id: runId },
-    data: {
-      currentStage: stage,
-      ...(status ? { status: status as never } : {}),
-    },
-  });
+  await withRetry(() =>
+    prisma.pipelineRun.update({
+      where: { id: runId },
+      data: {
+        currentStage: stage,
+        ...(status ? { status: status as never } : {}),
+      },
+    })
+  );
+}
+
+/**
+ * Controlled concurrency runner
+ */
+async function pLimit<T>(
+  tasks: (() => Promise<T | null>)[],
+  concurrency: number
+): Promise<(T | null)[]> {
+  const results: (T | null)[] = new Array(tasks.length).fill(null);
+  let i = 0;
+
+  async function worker() {
+    while (i < tasks.length) {
+      const idx = i++;
+      try {
+        results[idx] = await tasks[idx]();
+      } catch (err) {
+        console.error(`[pLimit] Task error at index ${idx}:`, err);
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Score contact priority based on job titles
+ */
+function getContactPriorityScore(title: string | null): number {
+  if (!title) return 0;
+  const t = title.toLowerCase();
+  
+  // Priority 1: Founders & C-Levels
+  if (
+    t.includes("founder") ||
+    t.includes("ceo") ||
+    t.includes("cto") ||
+    t.includes("coo") ||
+    t.includes("c-level")
+  ) {
+    return 10;
+  }
+  // Priority 2: VPs & Heads of Growth/Sales/Marketing
+  if (
+    t.includes("vp") ||
+    t.includes("vice president") ||
+    t.includes("head of growth") ||
+    t.includes("head of sales") ||
+    t.includes("director")
+  ) {
+    return 5;
+  }
+  // Priority 3: Other managers or decision maker matches
+  if (t.includes("manager") || t.includes("head") || t.includes("lead")) {
+    return 2;
+  }
+  return 1;
 }
 
 export async function runPipeline(data: PipelineJobData): Promise<void> {
   const { runId, seedDomain, orgId } = data;
   console.log(`[Pipeline] Starting run ${runId} for domain: ${seedDomain}`);
 
+  // Start database keep-alive heartbeat to prevent Railway TCP proxy from dropping the idle connection
+  const dbKeepAliveInterval = setInterval(async () => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (err: any) {
+      console.warn("[Database Keep-Alive] Heartbeat failed:", err.message ?? err);
+    }
+  }, 15000);
+
   try {
     // ─── Stage 1: Ocean.io — Find Lookalike Companies ──────────────────
     await updateStage(runId, 1);
     console.log(`[Stage 1] Finding lookalike companies for ${seedDomain}...`);
-    const lookalikeCompanies = await findLookalikeCompanies(seedDomain);
+    let lookalikeCompanies = await findLookalikeCompanies(seedDomain);
+    if (process.env.TEST_MODE === "true") {
+      console.log(`[Test Mode] Limiting lookalikes to 1 to speed up validation and prevent DB timeouts`);
+      lookalikeCompanies = lookalikeCompanies.slice(0, 1);
+    }
     console.log(`[Stage 1] Found ${lookalikeCompanies.length} companies`);
 
-    const savedCompanies = await Promise.all(
-      lookalikeCompanies
-        .filter((c) => c.domain && c.domain !== seedDomain)
-        .map(async (c) => {
-          try {
-            return await prisma.company.upsert({
-              where: { runId_domain: { runId, domain: c.domain } },
-              create: {
-                runId,
-                name: c.name,
-                domain: c.domain,
-                industry: c.industry,
-                headcount: c.headcount,
-                country: c.country,
-                website: c.website,
-                linkedinUrl: c.linkedinUrl,
-              },
-              update: {
-                name: c.name,
-                industry: c.industry,
-                headcount: c.headcount,
-              },
-            });
-          } catch {
-            return null;
-          }
-        })
-    );
-    const validCompanies = savedCompanies.filter(
-      (c): c is NonNullable<typeof c> => c !== null
-    );
+    const validCompanies: any[] = [];
+    for (const c of lookalikeCompanies.filter((c) => c.domain && c.domain !== seedDomain)) {
+      try {
+        const saved = await withRetry(() =>
+          prisma.company.upsert({
+            where: { runId_domain: { runId, domain: c.domain } },
+            create: {
+              runId,
+              name: c.name,
+              domain: c.domain,
+              industry: c.industry,
+              headcount: c.headcount,
+              country: c.country,
+              website: c.website,
+              linkedinUrl: c.linkedinUrl,
+            },
+            update: {
+              name: c.name,
+              industry: c.industry,
+              headcount: c.headcount,
+            },
+          })
+        );
+        validCompanies.push(saved);
+      } catch (err: any) {
+        console.error(`[Stage 1] Error saving company ${c.domain}:`, err.message ?? err);
+      }
+    }
     console.log(`[Stage 1] Saved ${validCompanies.length} companies to DB`);
 
     // ─── Stage 2: Prospeo — Find Decision Makers ───────────────────────
     await updateStage(runId, 2);
-    console.log(`[Stage 2] Finding decision makers...`);
-    const decisionMakers = await findDecisionMakers(lookalikeCompanies);
-    console.log(`[Stage 2] Found ${decisionMakers.length} contacts`);
+    console.log(`[Stage 2] Finding decision makers progressively...`);
 
-    const savedContacts = await Promise.all(
-      decisionMakers.map(async (dm) => {
-        const company = validCompanies.find((c) => c.domain === dm.companyDomain);
-        if (!company) return null;
+    const validContacts: any[] = [];
+    const companyTasks = lookalikeCompanies
+      .filter((c) => c.domain)
+      .map((company) => async () => {
+        const savedCompany = validCompanies.find((c) => c.domain === company.domain);
+        if (!savedCompany) return null;
+
         try {
-          return await prisma.contact.upsert({
-            where: {
-              runId_linkedinUrl: {
-                runId,
-                linkedinUrl:
-                  dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`,
-              },
-            },
-            create: {
-              runId,
-              companyId: company.id,
-              firstName: dm.firstName,
-              lastName: dm.lastName,
-              fullName: dm.fullName,
-              title: dm.title,
-              linkedinUrl: dm.linkedinUrl,
-            },
-            update: { title: dm.title },
-          });
-        } catch {
-          return null;
+          const contacts = await findDecisionMakers([company]);
+          const successfulUpserts = [];
+          for (const dm of contacts) {
+            const normalizedName = dm.fullName.replace(/\s+/g, '-').toLowerCase();
+            try {
+              const savedContact = await withRetry(() =>
+                prisma.contact.upsert({
+                  where: {
+                    runId_linkedinUrl: {
+                      runId,
+                      linkedinUrl:
+                        dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`,
+                    },
+                  },
+                  create: {
+                    runId,
+                    companyId: savedCompany.id,
+                    firstName: dm.firstName,
+                    lastName: dm.lastName,
+                    fullName: dm.fullName,
+                    title: dm.title,
+                    linkedinUrl: dm.linkedinUrl,
+                  },
+                  update: { title: dm.title },
+                })
+              );
+              successfulUpserts.push(savedContact);
+            } catch (err) {
+              console.error(`[Stage 2] Error saving contact ${dm.fullName}:`, err);
+            }
+          }
+          validContacts.push(...successfulUpserts);
+          console.log(`[Stage 2] Saved ${successfulUpserts.length} contacts progressively for ${company.domain}`);
+        } catch (err: any) {
+          console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain}:`, err.message ?? err);
         }
-      })
-    );
-    const validContacts = savedContacts.filter(
-      (c): c is NonNullable<typeof c> => c !== null
-    );
-    console.log(`[Stage 2] Saved ${validContacts.length} contacts to DB`);
+        return null;
+      });
+
+    await pLimit(companyTasks, 1);
+    console.log(`[Stage 2] Total progressive contacts saved: ${validContacts.length}`);
 
     // ─── Stage 3: Apollo.io — Resolve Work Emails ──────────────────────
     await updateStage(runId, 3);
-    console.log(`[Stage 3] Resolving work emails...`);
-    const verifiedEmails = await resolveWorkEmails(decisionMakers);
-    console.log(`[Stage 3] Verified ${verifiedEmails.length} emails`);
+    console.log(`[Stage 3] Resolving work emails progressively...`);
 
-    const savedEmails = await Promise.all(
-      verifiedEmails.map(async (ve) => {
-        // Match contact by first name + company domain
-        const contact = validContacts.find(
-          (c) =>
-            c.firstName === ve.contactFirstName &&
-            validCompanies.find((co) => co.id === c.companyId)?.domain ===
-              ve.companyDomain
-        );
-        if (!contact) return null;
-        try {
-          return await prisma.verifiedEmail.upsert({
-            where: {
-              contactId_email: { contactId: contact.id, email: ve.email },
-            },
-            create: {
-              contactId: contact.id,
-              email: ve.email,
-              status: ve.status,
-              verifiedAt: new Date(),
-            },
-            update: { status: ve.status, verifiedAt: new Date() },
-          });
-        } catch {
-          return null;
+    // Sort contacts by priority score (highest score first) so high-value titles are processed first
+    const sortedContacts = [...validContacts].sort((a, b) => {
+      const scoreA = getContactPriorityScore(a.title);
+      const scoreB = getContactPriorityScore(b.title);
+      return scoreB - scoreA;
+    });
+
+    const verifiedEmails: any[] = [];
+    const emailTasks = sortedContacts.map((contact) => async () => {
+      const company = validCompanies.find((c) => c.id === contact.companyId);
+      if (!company) return null;
+
+      const dm = {
+        firstName: contact.firstName,
+        lastName: contact.lastName ?? "",
+        fullName: contact.fullName ?? `${contact.firstName} ${contact.lastName ?? ""}`.trim(),
+        title: contact.title ?? "",
+        linkedinUrl: contact.linkedinUrl ?? undefined,
+        companyDomain: company.domain,
+        companyName: company.name,
+      };
+
+      try {
+        const resolved = await resolveWorkEmails([dm]);
+        if (resolved && resolved.length > 0) {
+          const ve = resolved[0];
+
+
+
+          await withRetry(() =>
+            prisma.verifiedEmail.upsert({
+              where: {
+                contactId_email: { contactId: contact.id, email: ve.email },
+              },
+              create: {
+                contactId: contact.id,
+                email: ve.email,
+                status: ve.status,
+                verifiedAt: new Date(),
+              },
+              update: { status: ve.status, verifiedAt: new Date() },
+            })
+          );
+
+          verifiedEmails.push(ve);
+          console.log(`[Stage 3] Progressively resolved email for: ${dm.fullName} -> ${ve.email}`);
         }
-      })
-    );
-    const validEmails = savedEmails.filter(
-      (e): e is NonNullable<typeof e> => e !== null
-    );
-    console.log(`[Stage 3] Saved ${validEmails.length} verified emails to DB`);
+      } catch (err: any) {
+        console.error(`[Stage 3] Error resolving email for ${dm.fullName}:`, err.message ?? err);
+      }
+      return null;
+    });
+
+    // Run parallel email lookups sequentially (concurrency 1) to respect Prospeo fallback rate limits
+    await pLimit(emailTasks, 1);
+    console.log(`[Stage 3] Total progressive emails resolved: ${verifiedEmails.length}`);
 
     // ─── Stage 4: Generate Email Drafts ────────────────────────────────
     await updateStage(runId, 4);
@@ -175,33 +284,37 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         }),
       }));
 
-    await prisma.campaign.create({
-      data: {
-        runId,
-        orgId,
-        status: "PENDING_APPROVAL",
-        subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
-        bodyTemplate: DEFAULT_BODY_TEMPLATE,
-        emailsJson: emailDrafts,
-      },
-    });
+    await withRetry(() =>
+      prisma.campaign.create({
+        data: {
+          runId,
+          orgId,
+          status: "PENDING_APPROVAL",
+          subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
+          bodyTemplate: DEFAULT_BODY_TEMPLATE,
+          emailsJson: emailDrafts,
+        },
+      })
+    );
 
     const stats = {
       companiesFound: validCompanies.length,
       contactsFound: validContacts.length,
-      verifiedEmails: validEmails.length,
+      verifiedEmails: verifiedEmails.length,
       emailsReady: emailDrafts.length,
     };
 
-    await prisma.pipelineRun.update({
-      where: { id: runId },
-      data: {
-        status: "PENDING_APPROVAL",
-        currentStage: 4,
-        completedAt: new Date(),
-        statsJson: stats,
-      },
-    });
+    await withRetry(() =>
+      prisma.pipelineRun.update({
+        where: { id: runId },
+        data: {
+          status: "PENDING_APPROVAL",
+          currentStage: 4,
+          completedAt: new Date(),
+          statsJson: stats,
+        },
+      })
+    );
 
     console.log(`[Pipeline Run Telemetry]
       Run ID: ${runId}
@@ -217,13 +330,21 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       Domain: ${seedDomain}
       Error message: ${error instanceof Error ? error.message : String(error)}`);
 
-    await prisma.pipelineRun.update({
-      where: { id: runId },
-      data: {
-        status: "FAILED",
-        errorMessage: error instanceof Error ? error.message : String(error),
-      },
-    });
+    try {
+      await withRetry(() =>
+        prisma.pipelineRun.update({
+          where: { id: runId },
+          data: {
+            status: "FAILED",
+            errorMessage: error instanceof Error ? error.message : String(error),
+          },
+        })
+      );
+    } catch (dbErr: any) {
+      console.error(`[Pipeline Run Telemetry Failure] Could not update failed run status in DB:`, dbErr.message ?? dbErr);
+    }
     throw error;
+  } finally {
+    clearInterval(dbKeepAliveInterval);
   }
 }

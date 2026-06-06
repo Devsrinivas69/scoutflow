@@ -10,9 +10,18 @@ export interface LookalikeCompany {
   linkedinUrl?: string;
 }
 
+import { getCached, setCached } from "@/lib/redis/cache";
+
 export async function findLookalikeCompanies(
   seedDomain: string
 ): Promise<LookalikeCompany[]> {
+  const cacheKey = `ocean:lookalikes:${seedDomain}`;
+  const cached = await getCached<LookalikeCompany[]>(cacheKey);
+  if (cached) {
+    console.log(`[Redis Cache] Hit for Ocean.io lookalikes of domain: ${seedDomain}`);
+    return cached;
+  }
+
   try {
     const apiKey = process.env.OCEAN_API_KEY;
     if (!apiKey) {
@@ -20,7 +29,7 @@ export async function findLookalikeCompanies(
       return getMockLookalikeCompanies(seedDomain);
     }
 
-    return await withRetry(async () => {
+    const companies = await withRetry(async () => {
       const response = await fetchWithTimeout("https://api.ocean.io/v1/lookalikes", {
         method: "POST",
         headers: {
@@ -46,7 +55,7 @@ export async function findLookalikeCompanies(
       const data = await response.json();
 
       // Map Ocean.io response to our normalized shape
-      const companies: LookalikeCompany[] = (data.companies ?? data.results ?? []).map(
+      const mapped: LookalikeCompany[] = (data.companies ?? data.results ?? []).map(
         (c: Record<string, unknown>) => ({
           name: (c.name ?? c.company_name ?? "") as string,
           domain: (c.domain ?? c.website_domain ?? "") as string,
@@ -59,12 +68,15 @@ export async function findLookalikeCompanies(
       );
 
       // Fallback: if API returns empty (sandbox/test key), generate mock data
-      if (companies.length === 0) {
+      if (mapped.length === 0) {
         return getMockLookalikeCompanies(seedDomain);
       }
 
-      return companies;
+      return mapped;
     });
+
+    await setCached(cacheKey, companies, 86400); // 24-hour cache TTL
+    return companies;
   } catch (err) {
     console.error(`[Ocean.io] API request failed, falling back to mock data:`, err);
     return getMockLookalikeCompanies(seedDomain);

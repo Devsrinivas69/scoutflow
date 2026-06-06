@@ -1,5 +1,6 @@
 import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
 import type { DecisionMaker } from "./prospeo.service";
+import { getCached, setCached } from "@/lib/redis/cache";
 
 export interface VerifiedEmailResult {
   contactFirstName: string;
@@ -56,12 +57,20 @@ export async function resolveWorkEmails(
 
   const tasks = contacts.map(
     (contact) => async () => {
+      const cacheKey = `enrich:email:${contact.companyDomain}:${contact.firstName.toLowerCase()}:${contact.lastName.toLowerCase()}`;
+      const cached = await getCached<VerifiedEmailResult>(cacheKey);
+      if (cached) {
+        console.log(`[Redis Cache] Hit for email of: ${contact.fullName}`);
+        return cached.email ? cached : null;
+      }
+
       // 1. Try Apollo.io match
       if (apolloKey) {
         try {
           console.log(`[Apollo] Attempting lookup for ${contact.fullName} (${contact.companyDomain})...`);
           const result = await withRetry(() => findEmailWithApollo(contact, apolloKey));
           if (result && result.email) {
+            await setCached(cacheKey, result, 86400);
             return result;
           }
         } catch (err: any) {
@@ -81,6 +90,7 @@ export async function resolveWorkEmails(
           await new Promise((resolve) => setTimeout(resolve, 1200));
           const result = await withRetry(() => findEmailWithProspeo(contact, prospeoKey));
           if (result && result.email) {
+            await setCached(cacheKey, result, 86400);
             return result;
           }
         } catch (err: any) {
@@ -89,6 +99,17 @@ export async function resolveWorkEmails(
       }
 
       console.log(`[Enrichment] No email resolved for ${contact.fullName}.`);
+      const negativeResult: VerifiedEmailResult = {
+        contactFirstName: contact.firstName,
+        contactLastName: contact.lastName,
+        contactFullName: contact.fullName,
+        contactTitle: contact.title,
+        email: "",
+        status: "INVALID",
+        companyDomain: contact.companyDomain,
+        companyName: contact.companyName,
+      };
+      await setCached(cacheKey, negativeResult, 86400);
       return null;
     }
   );
