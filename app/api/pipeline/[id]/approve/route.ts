@@ -121,12 +121,15 @@ export async function POST(
 
         await prisma.campaign.update({
           where: { id: campaign.id },
-          data: { status: "SENT", sentAt: new Date() },
+          data: { 
+            status: sentCount > 0 ? "SENT" : "FAILED", 
+            sentAt: sentCount > 0 ? new Date() : undefined 
+          },
         });
 
         await prisma.pipelineRun.update({
           where: { id: runId },
-          data: { status: "COMPLETED" },
+          data: { status: sentCount > 0 ? "COMPLETED" : "FAILED" },
         });
 
         await prisma.auditLog.create({

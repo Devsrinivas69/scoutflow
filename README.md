@@ -10,7 +10,7 @@ ScoutFlow is a production-grade outbound intelligence SaaS platform. Enter one c
 
 - 🔍 **Company Discovery** — Ocean.io finds 25+ lookalike companies
 - 👥 **Decision Maker Intelligence** — Prospeo identifies CEOs, VPs, Directors
-- ✅ **Email Verification** — Eazyreach verifies work emails
+- ✅ **Email Verification** — Apollo.io resolves work emails
 - ✉️ **Personalized Outreach** — Brevo sends tailored campaigns
 - 🛡️ **Mandatory Approval Gate** — Emails never send without your approval
 - 📊 **Analytics Dashboard** — Delivery, open, and response rates
@@ -63,7 +63,7 @@ NEXTAUTH_SECRET="..."          # generate: openssl rand -base64 32
 NEXTAUTH_URL="http://localhost:3000"
 OCEAN_API_KEY="..."
 PROSPEO_API_KEY="..."
-EAZYREACH_API_KEY="..."
+APOLLO_API_KEY="..."
 BREVO_API_KEY="..."
 BREVO_SENDER_EMAIL="..."
 BREVO_SENDER_NAME="..."
@@ -122,7 +122,7 @@ NEXTAUTH_SECRET=<generated>
 NEXTAUTH_URL=https://your-app.up.railway.app
 OCEAN_API_KEY=api_84fdAP_...
 PROSPEO_API_KEY=pk_ac492b67...
-EAZYREACH_API_KEY=3kdvxSBy...
+APOLLO_API_KEY=wnoeeV8LzMA5...
 BREVO_API_KEY=xkeysib-...
 BREVO_SENDER_EMAIL=contact@scout-flow.app
 BREVO_SENDER_NAME=ScoutFlow
@@ -167,7 +167,7 @@ scoutflow/
 │       ├── campaigns/
 │       └── exports/
 ├── lib/
-│   ├── services/                   # Ocean, Prospeo, Eazyreach, Brevo
+│   ├── services/                   # Ocean, Prospeo, Apollo, Brevo
 │   ├── queue/                      # BullMQ pipeline worker
 │   ├── db/prisma.ts                # Prisma singleton
 │   └── utils/                      # env validation, retry, email-template
@@ -186,7 +186,7 @@ User → /pipeline → enters domain
   → BullMQ job created
   → Worker: Stage 1 (Ocean.io) → companies saved
   → Worker: Stage 2 (Prospeo) → contacts saved
-  → Worker: Stage 3 (Eazyreach) → emails verified
+  → Worker: Stage 3 (Apollo.io) → emails resolved
   → Worker: Stage 4 → email drafts generated
   → Status: PENDING_APPROVAL ← approval gate
   → User reviews + approves

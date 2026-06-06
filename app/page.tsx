@@ -96,7 +96,7 @@ export default function LandingPage() {
                 {[
                   { id: "01", label: "Reconnaissance", desc: "Ocean.io identifies identical entity profiles." },
                   { id: "02", label: "Extraction", desc: "Prospeo retrieves key personnel and decision makers." },
-                  { id: "03", label: "Verification", desc: "Eazyreach confirms comms channels exist." },
+                  { id: "03", label: "Verification", desc: "Apollo.io confirms comms channels exist." },
                   { id: "04", label: "Deployment", desc: "Brevo launches personalized payloads." },
                 ].map((c) => (
                   <div key={c.id} className="panel p-6 border-[var(--brand-border)] hover:border-[var(--brand-primary)] transition-colors group cursor-default">

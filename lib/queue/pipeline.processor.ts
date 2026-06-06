@@ -8,7 +8,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
 import { findDecisionMakers } from "@/lib/services/prospeo.service";
-import { resolveWorkEmails } from "@/lib/services/eazyreach.service";
+import { resolveWorkEmails } from "@/lib/services/apollo.service";
 import {
   generateSubject,
   generateBody,
@@ -111,7 +111,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     );
     console.log(`[Stage 2] Saved ${validContacts.length} contacts to DB`);
 
-    // ─── Stage 3: Eazyreach — Resolve Work Emails ──────────────────────
+    // ─── Stage 3: Apollo.io — Resolve Work Emails ──────────────────────
     await updateStage(runId, 3);
     console.log(`[Stage 3] Resolving work emails...`);
     const verifiedEmails = await resolveWorkEmails(decisionMakers);
@@ -203,9 +203,20 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       },
     });
 
-    console.log(`[Pipeline] Run ${runId} complete. Stats:`, stats);
+    console.log(`[Pipeline Run Telemetry]
+      Run ID: ${runId}
+      Domain: ${seedDomain}
+      Companies found: ${stats.companiesFound}
+      Contacts found: ${stats.contactsFound}
+      Emails found: ${stats.verifiedEmails}
+      API Errors encountered: none (completed successfully)`);
   } catch (error) {
-    console.error(`[Pipeline] Run ${runId} failed:`, error);
+    console.error(`[Pipeline Run Telemetry Failure] Run ${runId} failed:`, error);
+    console.error(`[Pipeline Run Telemetry Failure Details]
+      Run ID: ${runId}
+      Domain: ${seedDomain}
+      Error message: ${error instanceof Error ? error.message : String(error)}`);
+
     await prisma.pipelineRun.update({
       where: { id: runId },
       data: {

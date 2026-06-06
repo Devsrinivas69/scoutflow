@@ -73,6 +73,19 @@ async function sendSingleEmail(
   }
 
   const data = await response.json();
+  
+  if (!data.messageId) {
+    throw new Error("Brevo response did not return a valid messageId");
+  }
+
+  console.log(`[Brevo API Send Success Log]
+    Recipient: ${recipient.email}
+    Subject: ${recipient.subject}
+    Sender: ${config.senderName} <${config.senderEmail}>
+    Message ID: ${data.messageId}
+    Timestamp: ${new Date().toISOString()}
+    Brevo Response: ${JSON.stringify(data)}`);
+
   return {
     email: recipient.email,
     messageId: data.messageId,

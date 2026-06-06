@@ -48,7 +48,7 @@ const STAGES = [
   { num: 0, icon: Globe, label: "Domain", desc: "Target Acquired" },
   { num: 1, icon: Search, label: "Discovery", desc: "Ocean.io" },
   { num: 2, icon: Users, label: "Contacts", desc: "Prospeo" },
-  { num: 3, icon: Shield, label: "Verification", desc: "Eazyreach" },
+  { num: 3, icon: Shield, label: "Verification", desc: "Apollo.io" },
   { num: 4, icon: Mail, label: "Outreach", desc: "Brevo" },
 ];
 
@@ -366,8 +366,10 @@ export default function MissionView() {
                       <div className="text-[var(--brand-text)] font-medium text-sm">{c.name}</div>
                       <div className="text-[var(--brand-muted)] text-xs mt-1">{c.title}</div>
                     </div>
-                    {c.email ? (
+                    {c.email && c.email !== "No verified email found" ? (
                       <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-1 rounded">VERIFIED</span>
+                    ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
+                      <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded">NOT FOUND</span>
                     ) : (
                       <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
                     )}

@@ -84,7 +84,7 @@ export async function GET(
       contacts: run.contacts.slice(0, 10).map((c) => ({
         name: c.fullName,
         title: c.title,
-        email: c.verifiedEmails[0]?.email ?? null,
+        email: c.verifiedEmails[0]?.email ?? "No verified email found",
       })),
       campaign: campaign
         ? {

@@ -17,10 +17,10 @@ function getApiKeyStatus() {
       connected: !!process.env.PROSPEO_API_KEY,
     },
     {
-      label: "Eazyreach",
-      var: "EAZYREACH_API_KEY",
-      status: process.env.EAZYREACH_API_KEY ? "Connected" : "Not Configured",
-      connected: !!process.env.EAZYREACH_API_KEY,
+      label: "Apollo.io",
+      var: "APOLLO_API_KEY",
+      status: process.env.APOLLO_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.APOLLO_API_KEY,
     },
     {
       label: "Brevo",
