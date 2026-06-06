@@ -16,7 +16,7 @@ export default function ProspectsPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
 
-  const { data, error, isLoading, mutate } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR<{ prospects: any[]; hasMore: boolean }>(
     `/api/prospects?page=${page}&q=${encodeURIComponent(debouncedSearch)}`,
     fetcher
   );
