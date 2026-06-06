@@ -1,0 +1,244 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Plan {
+  FREE
+  STARTER
+  GROWTH
+  ENTERPRISE
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  PENDING_APPROVAL
+  APPROVED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  DELIVERED
+  OPENED
+  REPLIED
+  BOUNCED
+  FAILED
+}
+
+enum VerificationStatus {
+  VALID
+  INVALID
+  CATCH_ALL
+  UNKNOWN
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENDING
+  SENT
+  FAILED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  users     User[]
+  runs      PipelineRun[]
+  campaigns Campaign[]
+  settings  Setting[]
+  auditLogs AuditLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("organizations")
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String?
+  passwordHash  String?
+  emailVerified DateTime?
+  role          Role         @default(MEMBER)
+  orgId         String?
+  org           Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  pipelineRuns  PipelineRun[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@map("users")
+}
+
+model PipelineRun {
+  id           String      @id @default(cuid())
+  seedDomain   String
+  status       RunStatus   @default(PENDING)
+  currentStage Int         @default(0)
+  errorMessage String?
+  statsJson    Json?
+  userId       String
+  orgId        String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  companies    Company[]
+  contacts     Contact[]
+  campaigns    Campaign[]
+  createdAt    DateTime    @default(now())
+  completedAt  DateTime?
+  updatedAt    DateTime    @updatedAt
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([status])
+  @@map("pipeline_runs")
+}
+
+model Company {
+  id         String      @id @default(cuid())
+  runId      String
+  run        PipelineRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  name       String
+  domain     String
+  industry   String?
+  headcount  String?
+  country    String?
+  website    String?
+  linkedinUrl String?
+  contacts   Contact[]
+  createdAt  DateTime    @default(now())
+
+  @@unique([runId, domain])
+  @@index([runId])
+  @@map("companies")
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  runId         String
+  run           PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  firstName     String
+  lastName      String?
+  fullName      String?
+  title         String?
+  linkedinUrl   String?
+  verifiedEmails VerifiedEmail[]
+  emailLogs     EmailLog[]
+  createdAt     DateTime       @default(now())
+
+  @@unique([runId, linkedinUrl])
+  @@index([runId])
+  @@index([companyId])
+  @@map("contacts")
+}
+
+model VerifiedEmail {
+  id         String             @id @default(cuid())
+  contactId  String
+  contact    Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  email      String
+  status     VerificationStatus @default(UNKNOWN)
+  verifiedAt DateTime?
+  createdAt  DateTime           @default(now())
+
+  @@unique([contactId, email])
+  @@index([contactId])
+  @@map("verified_emails")
+}
+
+model Campaign {
+  id              String         @id @default(cuid())
+  runId           String
+  run             PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  orgId           String
+  org             Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  status          CampaignStatus @default(DRAFT)
+  subjectTemplate String
+  bodyTemplate    String
+  emailsJson      Json?
+  approvedAt      DateTime?
+  sentAt          DateTime?
+  emailLogs       EmailLog[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([runId])
+  @@index([orgId])
+  @@map("campaigns")
+}
+
+model EmailLog {
+  id         String      @id @default(cuid())
+  campaignId String
+  campaign   Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contactId  String
+  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  email      String
+  subject    String
+  body       String      @db.Text
+  status     EmailStatus @default(PENDING)
+  brevoMsgId String?
+  sentAt     DateTime?
+  openedAt   DateTime?
+  repliedAt  DateTime?
+  createdAt  DateTime    @default(now())
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@map("email_logs")
+}
+
+model AuditLog {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  resource  String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  @@index([orgId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model Setting {
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  key       String
+  value     String       @db.Text
+  updatedAt DateTime     @updatedAt
+
+  @@unique([orgId, key])
+  @@map("settings")
+}
