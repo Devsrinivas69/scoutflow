@@ -6,13 +6,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function DashboardMetrics() {
   const session = await auth();
+  const orgId = (session?.user as { orgId?: string })?.orgId;
 
-  // Parallel fetch possible to get independent data (Section 5)
+  if (!orgId) {
+    return (
+      <div className="text-center py-12 text-muted-foreground text-sm">
+        No organization found for your account. Please contact support.
+      </div>
+    );
+  }
+
   const [totalProspects, activePipelines, recentRuns, emailStats] = await Promise.all([
-    prisma.contact.count(),
-    prisma.pipelineRun.count({ where: { status: { in: ["RUNNING", "PENDING", "PENDING_APPROVAL"] } } }),
+    // Scoped to org via the run relation
+    prisma.contact.count({ where: { run: { orgId } } }),
+    prisma.pipelineRun.count({
+      where: { orgId, status: { in: ["RUNNING", "PENDING", "PENDING_APPROVAL"] } },
+    }),
     prisma.pipelineRun.findMany({
-      where: { userId: session?.user?.id },
+      where: { orgId, userId: session?.user?.id },
       orderBy: { createdAt: "desc" },
       take: 5,
       select: {
@@ -23,8 +34,10 @@ export default async function DashboardMetrics() {
         _count: { select: { contacts: true } },
       },
     }),
+    // Scoped to org via campaign relation
     prisma.emailLog.groupBy({
-      by: ['status'],
+      by: ["status"],
+      where: { campaign: { orgId } },
       _count: true,
     }),
   ]);
@@ -32,9 +45,10 @@ export default async function DashboardMetrics() {
   // Calculate reply rate
   let totalSent = 0;
   let totalReplied = 0;
-  emailStats.forEach((stat: any) => {
-    if (['SENT', 'DELIVERED', 'OPENED', 'REPLIED'].includes(stat.status)) totalSent += stat._count;
-    if (stat.status === 'REPLIED') totalReplied += stat._count;
+  emailStats.forEach((stat) => {
+    if (["SENT", "DELIVERED", "OPENED", "REPLIED"].includes(stat.status))
+      totalSent += stat._count;
+    if (stat.status === "REPLIED") totalReplied += stat._count;
   });
   const replyRate = totalSent > 0 ? ((totalReplied / totalSent) * 100).toFixed(1) : "0.0";
 
@@ -52,7 +66,7 @@ export default async function DashboardMetrics() {
               <CardTitle className="text-xs text-muted-foreground uppercase tracking-wider">Total Prospects</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{totalProspects}</div>
+              <div className="text-3xl font-bold">{totalProspects.toLocaleString()}</div>
             </CardContent>
           </Card>
 
@@ -101,7 +115,7 @@ export default async function DashboardMetrics() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {recentRuns.map((run: any) => (
+                {recentRuns.map((run) => (
                   <tr key={run.id} className="hover:bg-muted/30 transition-colors group">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -156,8 +170,6 @@ export default async function DashboardMetrics() {
           </div>
         </Card>
       </div>
-
-      {/* Right Column could be here */}
     </div>
   );
 }

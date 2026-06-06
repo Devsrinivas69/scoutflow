@@ -26,7 +26,15 @@ async function getReportData(orgId: string) {
 export default async function ReportsPage() {
   const session = await auth();
   const orgId = (session?.user as { orgId?: string })?.orgId;
-  if (!orgId) return null;
+  if (!orgId) {
+    return (
+      <div className="p-8">
+        <p style={{ color: "#6B7BA4" }}>
+          No organization found. Please sign out and sign in again.
+        </p>
+      </div>
+    );
+  }
 
   const { totalEmails, sentEmails, openedEmails, repliedEmails, deliveryRate, openRate, responseRate, runs } =
     await getReportData(orgId);
@@ -126,7 +134,7 @@ export default async function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((r: any) => {
+              {runs.map((r) => {
                 const stats = (r.statsJson as Record<string, number>) ?? {};
                 return (
                   <tr key={r.id}>

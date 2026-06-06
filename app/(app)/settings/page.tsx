@@ -1,8 +1,39 @@
 import { auth } from "@/lib/auth/auth.config";
 import { Settings, Key, Building, User } from "lucide-react";
 
+// Check which API keys are actually set in the environment (server-side only)
+function getApiKeyStatus() {
+  return [
+    {
+      label: "Ocean.io",
+      var: "OCEAN_API_KEY",
+      status: process.env.OCEAN_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.OCEAN_API_KEY,
+    },
+    {
+      label: "Prospeo",
+      var: "PROSPEO_API_KEY",
+      status: process.env.PROSPEO_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.PROSPEO_API_KEY,
+    },
+    {
+      label: "Eazyreach",
+      var: "EAZYREACH_API_KEY",
+      status: process.env.EAZYREACH_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.EAZYREACH_API_KEY,
+    },
+    {
+      label: "Brevo",
+      var: "BREVO_API_KEY",
+      status: process.env.BREVO_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.BREVO_API_KEY,
+    },
+  ];
+}
+
 export default async function SettingsPage() {
   const session = await auth();
+  const apiKeys = getApiKeyStatus();
 
   return (
     <div className="p-8 max-w-3xl">
@@ -21,12 +52,12 @@ export default async function SettingsPage() {
         <div className="grid gap-4">
           <div>
             <label className="block text-sm font-medium mb-2" style={{ color: "#E8EAF6" }}>Full Name</label>
-            <input type="text" defaultValue={session?.user?.name ?? ""} className="input-field" />
+            <input type="text" defaultValue={session?.user?.name ?? ""} className="input-field" readOnly />
           </div>
           <div>
             <label className="block text-sm font-medium mb-2" style={{ color: "#E8EAF6" }}>Email</label>
-            <input type="email" defaultValue={session?.user?.email ?? ""} className="input-field" disabled
-              style={{ opacity: 0.6, cursor: "not-allowed" }} />
+            <input type="email" defaultValue={session?.user?.email ?? ""} className="input-field"
+              disabled style={{ opacity: 0.6, cursor: "not-allowed" }} />
           </div>
         </div>
       </div>
@@ -42,19 +73,16 @@ export default async function SettingsPage() {
           API keys are configured via environment variables for security. Update them in Railway dashboard or your .env file.
         </p>
         <div className="space-y-3">
-          {[
-            { label: "Ocean.io", var: "OCEAN_API_KEY", status: "Connected" },
-            { label: "Prospeo", var: "PROSPEO_API_KEY", status: "Connected" },
-            { label: "Eazyreach", var: "EAZYREACH_API_KEY", status: "Connected" },
-            { label: "Brevo", var: "BREVO_API_KEY", status: "Connected" },
-          ].map((api) => (
+          {apiKeys.map((api) => (
             <div key={api.label} className="flex items-center justify-between p-4 rounded-xl"
               style={{ background: "rgba(11,16,32,0.5)", border: "1px solid rgba(109,93,246,0.1)" }}>
               <div>
                 <div className="font-medium text-sm" style={{ color: "#E8EAF6" }}>{api.label}</div>
                 <div className="text-xs font-mono mt-0.5" style={{ color: "#6B7BA4" }}>{api.var}</div>
               </div>
-              <span className="badge badge-success">{api.status}</span>
+              <span className={`badge ${api.connected ? "badge-success" : "badge-error"}`}>
+                {api.status}
+              </span>
             </div>
           ))}
         </div>

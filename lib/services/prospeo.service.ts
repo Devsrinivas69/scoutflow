@@ -11,30 +11,45 @@ export interface DecisionMaker {
   companyName: string;
 }
 
+/**
+ * Run tasks with a concurrency limit (avoids thundering herd on external API)
+ */
+async function pLimit<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number
+): Promise<T[]> {
+  const results: T[] = [];
+  let i = 0;
+
+  async function worker() {
+    while (i < tasks.length) {
+      const idx = i++;
+      results[idx] = await tasks[idx]();
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
 export async function findDecisionMakers(
   companies: LookalikeCompany[]
 ): Promise<DecisionMaker[]> {
   const apiKey = process.env.PROSPEO_API_KEY;
   if (!apiKey) throw new Error("PROSPEO_API_KEY is not set");
 
-  const allContacts: DecisionMaker[] = [];
+  // Run up to 5 company lookups in parallel instead of sequential
+  const tasks = companies.map(
+    (company) => () =>
+      withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
+        console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
+        return [] as DecisionMaker[];
+      })
+  );
 
-  for (const company of companies) {
-    try {
-      const contacts = await withRetry(() =>
-        searchCompanyContacts(company, apiKey)
-      );
-      allContacts.push(...contacts);
-    } catch (err) {
-      console.error(
-        `[Prospeo] Failed to get contacts for ${company.domain}:`,
-        err
-      );
-      // Continue with other companies on partial failure
-    }
-  }
-
-  return allContacts;
+  const results = await pLimit(tasks, 5);
+  return results.flat();
 }
 
 async function searchCompanyContacts(

@@ -36,6 +36,10 @@ export async function POST(req: NextRequest) {
         "Added At": c.createdAt.toISOString(),
       }));
 
+      if (rows.length === 0) {
+        return NextResponse.json({ error: "No contacts found to export" }, { status: 404 });
+      }
+
       if (format === "json") {
         return new NextResponse(JSON.stringify(rows, null, 2), {
           headers: {
@@ -46,7 +50,7 @@ export async function POST(req: NextRequest) {
       }
 
       // CSV
-      const headers = Object.keys(rows[0] ?? {});
+      const headers = Object.keys(rows[0]);
       const csv = [
         headers.join(","),
         ...rows.map((row) =>
@@ -78,6 +82,10 @@ export async function POST(req: NextRequest) {
       "Added At": c.createdAt.toISOString(),
     }));
 
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "No companies found to export" }, { status: 404 });
+    }
+
     if (format === "json") {
       return new NextResponse(JSON.stringify(rows, null, 2), {
         headers: {
@@ -87,7 +95,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const headers = Object.keys(rows[0] ?? {});
+    const headers = Object.keys(rows[0]);
     const csv = [
       headers.join(","),
       ...rows.map((row) =>

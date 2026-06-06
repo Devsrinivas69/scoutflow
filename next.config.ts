@@ -7,7 +7,11 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: ["localhost:3000"],
+      allowedOrigins: [
+        "localhost:3000",
+        "scout-flow.app",
+        "www.scout-flow.app",
+      ],
     },
   },
 };

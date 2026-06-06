@@ -123,9 +123,9 @@ export default function SignInPage() {
             </div>
 
             <div className="flex justify-end">
-              <Link href="/forgot-password" className="text-sm" style={{ color: "#6D5DF6" }}>
+              <span className="text-sm cursor-not-allowed select-none" style={{ color: "rgba(109,93,246,0.4)" }}>
                 Forgot password?
-              </Link>
+              </span>
             </div>
 
             <button

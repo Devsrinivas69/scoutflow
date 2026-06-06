@@ -16,7 +16,6 @@ export async function POST(
     const { id: runId } = await params;
     const body = await req.json().catch(() => ({}));
 
-    // Optional: user can pass edited subject/body templates
     const { subjectTemplate, bodyTemplate } = body as {
       subjectTemplate?: string;
       bodyTemplate?: string;
@@ -48,7 +47,7 @@ export async function POST(
       return NextResponse.json({ error: "No campaign found for this run" }, { status: 404 });
     }
 
-    // Apply any edits from the user
+    // Apply any template edits from the user
     if (subjectTemplate || bodyTemplate) {
       await prisma.campaign.update({
         where: { id: campaign.id },
@@ -59,7 +58,6 @@ export async function POST(
       });
     }
 
-    // Get email drafts from campaign
     const emailDrafts = (campaign.emailsJson as Array<{
       email: string;
       name: string;
@@ -71,7 +69,7 @@ export async function POST(
       return NextResponse.json({ error: "No emails to send" }, { status: 400 });
     }
 
-    // Mark campaign as approved
+    // Mark as SENDING immediately so the UI updates
     await prisma.campaign.update({
       where: { id: campaign.id },
       data: { status: "SENDING", approvedAt: new Date() },
@@ -82,73 +80,86 @@ export async function POST(
       data: { status: "APPROVED" },
     });
 
-    // Send emails via Brevo
-    const results = await sendOutreachEmails(emailDrafts);
+    // Respond immediately — don't block the HTTP request on email delivery
+    // The actual sending happens asynchronously after response is sent
+    const actingUserId = session.user.id; // capture before async boundary
+    void (async () => {
+      try {
+        const results = await sendOutreachEmails(emailDrafts);
 
-    // Save email logs
-    const contacts = await prisma.contact.findMany({
-      where: { runId },
-      include: { verifiedEmails: true },
-    });
+        // Save email logs
+        const contacts = await prisma.contact.findMany({
+          where: { runId },
+          include: { verifiedEmails: true },
+        });
 
-    await Promise.all(
-      results.map(async (result) => {
-        const contact = contacts.find((c) =>
-          c.verifiedEmails.some((ve) => ve.email === result.email)
+        await Promise.all(
+          results.map(async (result) => {
+            const contact = contacts.find((c) =>
+              c.verifiedEmails.some((ve) => ve.email === result.email)
+            );
+            const draft = emailDrafts.find((d) => d.email === result.email);
+            if (!contact || !draft) return;
+
+            await prisma.emailLog.create({
+              data: {
+                campaignId: campaign.id,
+                contactId: contact.id,
+                email: result.email,
+                subject: draft.subject,
+                body: draft.body,
+                status: result.success ? "SENT" : "FAILED",
+                brevoMsgId: result.messageId,
+                sentAt: result.success ? new Date() : undefined,
+              },
+            });
+          })
         );
-        const draft = emailDrafts.find((d) => d.email === result.email);
-        if (!contact || !draft) return;
 
-        await prisma.emailLog.create({
+        const sentCount = results.filter((r) => r.success).length;
+        const failedCount = results.filter((r) => !r.success).length;
+
+        await prisma.campaign.update({
+          where: { id: campaign.id },
+          data: { status: "SENT", sentAt: new Date() },
+        });
+
+        await prisma.pipelineRun.update({
+          where: { id: runId },
+          data: { status: "COMPLETED" },
+        });
+
+        await prisma.auditLog.create({
           data: {
-            campaignId: campaign.id,
-            contactId: contact.id,
-            email: result.email,
-            subject: draft.subject,
-            body: draft.body,
-            status: result.success ? "SENT" : "FAILED",
-            brevoMsgId: result.messageId,
-            sentAt: result.success ? new Date() : undefined,
+            orgId: run.orgId,
+            userId: actingUserId,
+            action: "campaign.sent",
+            resource: campaign.id,
+            metadata: { sentCount, failedCount, runId },
           },
         });
-      })
-    );
 
-    const sentCount = results.filter((r) => r.success).length;
-    const failedCount = results.filter((r) => !r.success).length;
+        console.log(`[Approve] Campaign ${campaign.id} sent: ${sentCount} ok, ${failedCount} failed`);
+      } catch (err) {
+        console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);
+        // Mark campaign as failed so user can see the error
+        await prisma.campaign.update({
+          where: { id: campaign.id },
+          data: { status: "FAILED" },
+        }).catch(() => {});
+      }
+    })();
 
-    // Mark campaign and run as completed
-    await prisma.campaign.update({
-      where: { id: campaign.id },
-      data: { status: "SENT", sentAt: new Date() },
-    });
-
-    await prisma.pipelineRun.update({
-      where: { id: runId },
-      data: { status: "COMPLETED" },
-    });
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        orgId: run.orgId,
-        userId: session.user.id,
-        action: "campaign.sent",
-        resource: campaign.id,
-        metadata: { sentCount, failedCount, runId },
-      },
-    });
-
+    // Return immediately — the UI will poll for status updates
     return NextResponse.json({
       success: true,
-      sentCount,
-      failedCount,
-      total: results.length,
+      message: "Campaign approved. Emails are being sent.",
+      total: emailDrafts.length,
     });
   } catch (error) {
     console.error("[API] Pipeline approve error:", error);
     return NextResponse.json(
-      { error: "Failed to send campaign" },
+      { error: "Failed to approve campaign" },
       { status: 500 }
     );
   }

@@ -13,29 +13,50 @@ export interface VerifiedEmailResult {
   companyName: string;
 }
 
+/**
+ * Run tasks with a concurrency limit (avoids thundering herd on external API)
+ */
+async function pLimit<T>(
+  tasks: (() => Promise<T | null>)[],
+  concurrency: number
+): Promise<(T | null)[]> {
+  const results: (T | null)[] = new Array(tasks.length).fill(null);
+  let i = 0;
+
+  async function worker() {
+    while (i < tasks.length) {
+      const idx = i++;
+      try {
+        results[idx] = await tasks[idx]();
+      } catch (err) {
+        console.error(`[Eazyreach] Worker error at index ${idx}:`, err);
+        results[idx] = null;
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
 export async function resolveWorkEmails(
   contacts: DecisionMaker[]
 ): Promise<VerifiedEmailResult[]> {
   const apiKey = process.env.EAZYREACH_API_KEY;
   if (!apiKey) throw new Error("EAZYREACH_API_KEY is not set");
 
-  const results: VerifiedEmailResult[] = [];
+  // Run up to 5 email lookups in parallel instead of sequential
+  const tasks = contacts.map(
+    (contact) => () =>
+      withRetry(() => findEmail(contact, apiKey)).catch((err) => {
+        console.error(`[Eazyreach] Failed to resolve email for ${contact.fullName}:`, err);
+        return null;
+      })
+  );
 
-  for (const contact of contacts) {
-    try {
-      const email = await withRetry(() =>
-        findEmail(contact, apiKey)
-      );
-      if (email) results.push(email);
-    } catch (err) {
-      console.error(
-        `[Eazyreach] Failed to resolve email for ${contact.fullName}:`,
-        err
-      );
-    }
-  }
-
-  return results;
+  const results = await pLimit(tasks, 5);
+  return results.filter((r): r is VerifiedEmailResult => r !== null);
 }
 
 async function findEmail(
@@ -64,7 +85,6 @@ async function findEmail(
   const email = data.email ?? data.data?.email;
 
   if (!email) {
-    // Fallback: generate mock email for dev
     return getMockEmail(contact);
   }
 
@@ -100,11 +120,7 @@ function mapStatus(raw: string): "VALID" | "INVALID" | "CATCH_ALL" | "UNKNOWN" {
 }
 
 function getMockEmail(contact: DecisionMaker): VerifiedEmailResult {
-  const emailPatterns = [
-    `${contact.firstName.toLowerCase()}.${contact.lastName.toLowerCase()}@${contact.companyDomain}`,
-    `${contact.firstName.toLowerCase()[0]}${contact.lastName.toLowerCase()}@${contact.companyDomain}`,
-  ];
-  const email = emailPatterns[0];
+  const email = `${contact.firstName.toLowerCase()}.${contact.lastName.toLowerCase()}@${contact.companyDomain}`;
   console.log(`[Eazyreach Mock] Generated email for ${contact.fullName}: ${email}`);
   return {
     contactFirstName: contact.firstName,

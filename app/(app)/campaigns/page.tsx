@@ -1,7 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import useSWR from "swr";
+import { fetcher } from "@/lib/swr-fetcher";
 import { Mail, Globe, CheckCircle, Clock, Send, Eye } from "lucide-react";
+import { useState } from "react";
+
+interface EmailDraft {
+  email: string;
+  name: string;
+  subject: string;
+  body: string;
+}
 
 interface Campaign {
   id: string;
@@ -10,11 +19,18 @@ interface Campaign {
   seedDomain: string;
   subjectTemplate: string;
   bodyTemplate: string;
-  emailsJson: Array<{ email: string; name: string; subject: string; body: string }> | null;
+  emailsJson: EmailDraft[] | null;
   emailCount: number;
   approvedAt: string | null;
   sentAt: string | null;
   createdAt: string;
+}
+
+interface CampaignsResponse {
+  campaigns: Campaign[];
+  total: number;
+  page: number;
+  totalPages: number;
 }
 
 function CampaignStatusBadge({ status }: { status: string }) {
@@ -31,24 +47,15 @@ function CampaignStatusBadge({ status }: { status: string }) {
 }
 
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selected, setSelected] = useState<Campaign | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  const fetchCampaigns = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/campaigns");
-      if (res.ok) {
-        const data = await res.json();
-        setCampaigns(data.campaigns);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data, error, isLoading } = useSWR<CampaignsResponse>(
+    "/api/campaigns",
+    fetcher,
+    { revalidateOnFocus: true }
+  );
 
-  useEffect(() => { fetchCampaigns(); }, [fetchCampaigns]);
+  const campaigns = data?.campaigns ?? [];
 
   return (
     <div className="p-8">
@@ -60,10 +67,15 @@ export default function CampaignsPage() {
       <div className="grid lg:grid-cols-5 gap-6">
         {/* Campaign list */}
         <div className="lg:col-span-2">
-          {loading ? (
+          {isLoading ? (
             <div className="py-20 text-center">
               <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin mx-auto"
                 style={{ borderColor: "#6D5DF6", borderTopColor: "transparent" }} />
+            </div>
+          ) : error ? (
+            <div className="py-20 text-center rounded-2xl"
+              style={{ background: "rgba(18,25,43,0.7)", border: "1px solid rgba(255,90,95,0.2)" }}>
+              <p className="text-sm" style={{ color: "#FF5A5F" }}>Failed to load campaigns. Please try again.</p>
             </div>
           ) : campaigns.length === 0 ? (
             <div className="py-20 text-center rounded-2xl"
