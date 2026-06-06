@@ -1,5 +1,6 @@
 import { Worker, type Job } from "bullmq";
-import { redisConnection, type PipelineJobData } from "./pipeline.queue";
+import { getRedisClient } from "../redis/connection";
+import { type PipelineJobData } from "./pipeline.queue";
 import { runPipeline } from "./pipeline.processor";
 
 export function startWorker() {
@@ -7,7 +8,7 @@ export function startWorker() {
     "pipeline",
     (job: Job<PipelineJobData>) => runPipeline(job.data),
     {
-      connection: redisConnection,
+      connection: getRedisClient() as any,
       concurrency: 2,
     }
   );

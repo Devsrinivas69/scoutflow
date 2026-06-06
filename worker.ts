@@ -3,6 +3,7 @@
 // It runs separately from the Next.js app and processes BullMQ pipeline jobs.
 
 import "dotenv/config";
+import "./lib/env"; // Enforce environment validation
 import { startWorker } from "./lib/queue/pipeline.worker";
 
 console.log("[ScoutFlow Worker] Starting...");
