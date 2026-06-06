@@ -16,12 +16,7 @@ function getApiKeyStatus() {
       status: process.env.PROSPEO_API_KEY ? "Connected" : "Not Configured",
       connected: !!process.env.PROSPEO_API_KEY,
     },
-    {
-      label: "Apollo.io",
-      var: "APOLLO_API_KEY",
-      status: process.env.APOLLO_API_KEY ? "Connected" : "Not Configured",
-      connected: !!process.env.APOLLO_API_KEY,
-    },
+
     {
       label: "Brevo",
       var: "BREVO_API_KEY",

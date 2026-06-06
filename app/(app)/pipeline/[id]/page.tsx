@@ -32,7 +32,7 @@ interface PipelineStatus {
     emailsReady: number;
   };
   companies: Array<{ name: string; domain: string; industry?: string; country?: string }>;
-  contacts: Array<{ name: string; title: string; email: string | null }>;
+  contacts: Array<{ name: string; title: string; email: string | null; patternUsed?: string | null; confidenceScore?: string | null }>;
   campaign: {
     id: string;
     status: string;
@@ -48,7 +48,7 @@ const STAGES = [
   { num: 0, icon: Globe, label: "Domain", desc: "Target Acquired" },
   { num: 1, icon: Search, label: "Discovery", desc: "Ocean.io" },
   { num: 2, icon: Users, label: "Contacts", desc: "Prospeo" },
-  { num: 3, icon: Shield, label: "Verification", desc: "Apollo.io" },
+  { num: 3, icon: Shield, label: "EazyReach", desc: "Email Discovery" },
   { num: 4, icon: Mail, label: "Outreach", desc: "Brevo" },
 ];
 
@@ -255,7 +255,7 @@ export default function MissionView() {
           </div>
 
           <div>
-            <div className="metric-label">Verified Comms</div>
+            <div className="metric-label">Predicted Comms</div>
             <motion.div
               key={data.stats.verifiedEmails}
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -365,9 +365,21 @@ export default function MissionView() {
                     <div>
                       <div className="text-[var(--brand-text)] font-medium text-sm">{c.name}</div>
                       <div className="text-[var(--brand-muted)] text-xs mt-1">{c.title}</div>
+                      {c.email && c.email !== "No verified email found" && c.patternUsed && (
+                        <div className="text-[10px] text-[var(--brand-muted)] font-mono mt-1">
+                          Pattern: {c.patternUsed}
+                        </div>
+                      )}
                     </div>
                     {c.email && c.email !== "No verified email found" ? (
-                      <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-1 rounded">VERIFIED</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded">PREDICTED</span>
+                        {c.confidenceScore && (
+                          <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
+                            Confidence: {c.confidenceScore}
+                          </span>
+                        )}
+                      </div>
                     ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
                       <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded">NOT FOUND</span>
                     ) : (

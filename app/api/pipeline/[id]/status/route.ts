@@ -81,11 +81,16 @@ export async function GET(
         industry: c.industry,
         country: c.country,
       })),
-      contacts: run.contacts.slice(0, 10).map((c) => ({
-        name: c.fullName,
-        title: c.title,
-        email: c.verifiedEmails[0]?.email ?? "No verified email found",
-      })),
+      contacts: run.contacts.slice(0, 10).map((c) => {
+        const ve = c.verifiedEmails[0] ?? null;
+        return {
+          name: c.fullName,
+          title: c.title,
+          email: ve?.email ?? null,
+          patternUsed: ve?.patternUsed ?? null,
+          confidenceScore: ve?.confidenceScore ?? null,
+        };
+      }),
       campaign: campaign
         ? {
             id: campaign.id,

@@ -160,13 +160,15 @@ model Contact {
 }
 
 model VerifiedEmail {
-  id         String             @id @default(cuid())
-  contactId  String
-  contact    Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  email      String
-  status     VerificationStatus @default(UNKNOWN)
-  verifiedAt DateTime?
-  createdAt  DateTime           @default(now())
+  id              String             @id @default(cuid())
+  contactId       String
+  contact         Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  email           String
+  status          VerificationStatus @default(UNKNOWN)
+  patternUsed     String?
+  confidenceScore String?
+  verifiedAt      DateTime?
+  createdAt       DateTime           @default(now())
 
   @@unique([contactId, email])
   @@index([contactId])

@@ -8,7 +8,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
 import { findDecisionMakers } from "@/lib/services/prospeo.service";
-import { resolveWorkEmails } from "@/lib/services/apollo.service";
+import { resolveWorkEmails } from "@/lib/services/eazyreach.service";
 import { withRetry } from "@/lib/utils/retry";
 import {
   generateSubject,
@@ -198,9 +198,9 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     await pLimit(companyTasks, 1);
     console.log(`[Stage 2] Total progressive contacts saved: ${validContacts.length}`);
 
-    // ─── Stage 3: Apollo.io — Resolve Work Emails ──────────────────────
+    // ─── Stage 3: EazyReach — Email Discovery Pattern Guesser ──────────
     await updateStage(runId, 3);
-    console.log(`[Stage 3] Resolving work emails progressively...`);
+    console.log(`[Stage 3] Discovering email patterns progressively...`);
 
     // Sort contacts by priority score (highest score first) so high-value titles are processed first
     const sortedContacts = [...validContacts].sort((a, b) => {
@@ -210,9 +210,9 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     });
 
     const verifiedEmails: any[] = [];
-    const emailTasks = sortedContacts.map((contact) => async () => {
+    for (const contact of sortedContacts) {
       const company = validCompanies.find((c) => c.id === contact.companyId);
-      if (!company) return null;
+      if (!company) continue;
 
       const dm = {
         firstName: contact.firstName,
@@ -229,8 +229,6 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         if (resolved && resolved.length > 0) {
           const ve = resolved[0];
 
-
-
           await withRetry(() =>
             prisma.verifiedEmail.upsert({
               where: {
@@ -240,23 +238,26 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                 contactId: contact.id,
                 email: ve.email,
                 status: ve.status,
+                patternUsed: ve.patternUsed,
+                confidenceScore: ve.confidenceScore,
                 verifiedAt: new Date(),
               },
-              update: { status: ve.status, verifiedAt: new Date() },
+              update: {
+                status: ve.status,
+                patternUsed: ve.patternUsed,
+                confidenceScore: ve.confidenceScore,
+                verifiedAt: new Date(),
+              },
             })
           );
 
           verifiedEmails.push(ve);
-          console.log(`[Stage 3] Progressively resolved email for: ${dm.fullName} -> ${ve.email}`);
+          console.log(`[Stage 3] Progressively generated email for: ${dm.fullName} -> ${ve.email} (${ve.confidenceScore} confidence)`);
         }
       } catch (err: any) {
-        console.error(`[Stage 3] Error resolving email for ${dm.fullName}:`, err.message ?? err);
+        console.error(`[Stage 3] Error generating email for ${dm.fullName}:`, err.message ?? err);
       }
-      return null;
-    });
-
-    // Run parallel email lookups sequentially (concurrency 1) to respect Prospeo fallback rate limits
-    await pLimit(emailTasks, 1);
+    }
     console.log(`[Stage 3] Total progressive emails resolved: ${verifiedEmails.length}`);
 
     // ─── Stage 4: Generate Email Drafts ────────────────────────────────
