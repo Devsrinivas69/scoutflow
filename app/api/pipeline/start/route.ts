@@ -14,13 +14,11 @@ const startSchema = z.object({
 });
 
 /**
- * Returns true if we should use the BullMQ queue (Redis available + production).
- * In local dev without Redis, falls back to running the pipeline in-process.
+ * Use the BullMQ queue only if Redis is actually configured.
+ * This works correctly in both dev (no Redis) and production (Redis optional).
+ * If REDIS_URL is not set, the pipeline runs in-process instead.
  */
 function shouldUseQueue(): boolean {
-  // Always use the queue in production
-  if (process.env.NODE_ENV === "production") return true;
-  // In dev, use the queue only if REDIS_URL is explicitly configured
   return !!process.env.REDIS_URL;
 }
 
