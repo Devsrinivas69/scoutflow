@@ -3,6 +3,12 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr-fetcher";
+import type { Prospect } from "@/types/prospect";
+
+interface ProspectsResponse {
+  prospects: Prospect[];
+  hasMore: boolean;
+}
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -16,7 +22,7 @@ export default function ProspectsPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
 
-  const { data, error, isLoading, mutate } = useSWR<{ prospects: any[]; hasMore: boolean }>(
+  const { data, error, isLoading, mutate } = useSWR<ProspectsResponse>(
     `/api/prospects?page=${page}&q=${encodeURIComponent(debouncedSearch)}`,
     fetcher
   );
@@ -74,7 +80,7 @@ export default function ProspectsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {data.prospects.map((p: any) => (
+                  {data?.prospects?.map((p: Prospect) => (
                     <tr key={p.id} className="hover:bg-muted/10 transition-colors">
                       <td className="px-6 py-4 text-foreground font-medium">{p.firstName} {p.lastName}</td>
                       <td className="px-6 py-4 text-muted-foreground">{p.title}</td>
