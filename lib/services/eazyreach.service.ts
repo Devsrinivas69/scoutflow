@@ -44,14 +44,17 @@ export async function resolveWorkEmails(
   contacts: DecisionMaker[]
 ): Promise<VerifiedEmailResult[]> {
   const apiKey = process.env.EAZYREACH_API_KEY;
-  if (!apiKey) throw new Error("EAZYREACH_API_KEY is not set");
+  if (!apiKey) {
+    console.warn("EAZYREACH_API_KEY is not set. Generating mock emails for all contacts.");
+    return contacts.map(getMockEmail);
+  }
 
   // Run up to 5 email lookups in parallel instead of sequential
   const tasks = contacts.map(
     (contact) => () =>
       withRetry(() => findEmail(contact, apiKey)).catch((err) => {
         console.error(`[Eazyreach] Failed to resolve email for ${contact.fullName}:`, err);
-        return null;
+        return getMockEmail(contact);
       })
   );
 

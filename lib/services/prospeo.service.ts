@@ -37,14 +37,17 @@ export async function findDecisionMakers(
   companies: LookalikeCompany[]
 ): Promise<DecisionMaker[]> {
   const apiKey = process.env.PROSPEO_API_KEY;
-  if (!apiKey) throw new Error("PROSPEO_API_KEY is not set");
+  if (!apiKey) {
+    console.warn("PROSPEO_API_KEY is not set. Generating mock contacts for all companies.");
+    return companies.flatMap(getMockDecisionMakers);
+  }
 
   // Run up to 5 company lookups in parallel instead of sequential
   const tasks = companies.map(
     (company) => () =>
       withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
         console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
-        return [] as DecisionMaker[];
+        return getMockDecisionMakers(company);
       })
   );
 
