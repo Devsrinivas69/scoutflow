@@ -14,10 +14,12 @@ export async function GET() {
     dbError = err instanceof Error ? err.message : String(err);
   }
 
-  // Perform a Redis ping health check
+  // Redis health check — Redis is optional for the web server (only needed for worker)
+  // Do not fail the healthcheck if Redis is unconfigured
   const redisHealth = await checkRedisHealth();
+  const redisIsBlocker = redisHealth.status === "unhealthy"; // unconfigured is OK
 
-  const isHealthy = dbStatus === "healthy" && redisHealth.status === "healthy";
+  const isHealthy = dbStatus === "healthy" && !redisIsBlocker;
 
   return NextResponse.json(
     {
