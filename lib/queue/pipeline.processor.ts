@@ -7,7 +7,8 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
-import { findDecisionMakers } from "@/lib/services/prospeo.service";
+import { findDecisionMakers, RateLimitError } from "@/lib/services/prospeo.service";
+import { findDecisionMakersApollo } from "@/lib/services/apollo.service";
 import { auditAndScoreContacts } from "@/lib/services/contact-audit.service";
 import { withRetry } from "@/lib/utils/retry";
 import {
@@ -155,52 +156,108 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         const savedCompany = validCompanies.find((c) => c.domain === company.domain);
         if (!savedCompany) return null;
 
+        let contacts: any[] = [];
+        let isFallback = false;
+        let failoverReason: string | null = null;
+
         try {
-          const contacts = await findDecisionMakers([company]);
+          contacts = await findDecisionMakers([company]);
+        } catch (err: any) {
+          const isRateLimit = err.name === "RateLimitError" ||
+            err.message?.includes("429") ||
+            err.message?.toLowerCase().includes("rate limit");
+
+          if (isRateLimit) {
+            console.warn(`[Stage 2] Prospeo rate limited (429) for ${company.domain}. Activating Apollo fallback...`);
+            isFallback = true;
+            failoverReason = "prospeo-rate-limit";
+            try {
+              contacts = await findDecisionMakersApollo([company]);
+            } catch (apolloErr: any) {
+              console.error(`[Stage 2] Apollo fallback also failed for ${company.domain}:`, apolloErr.message ?? apolloErr);
+            }
+          } else {
+            console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain}:`, err.message ?? err);
+          }
+        }
+
+        try {
           const auditedContacts = auditAndScoreContacts(contacts, company.domain);
           const successfulUpserts = [];
           
           for (const dm of auditedContacts) {
             try {
-              // Appending duplicate identifier suffix ensures we bypass unique constraint violations and display duplicates in diagnostics panel
-              const storedLinkedinUrl = dm.duplicateStatus === "DUPLICATE"
-                ? (dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`) + `-dup-${Math.random().toString(36).substring(2, 6)}`
-                : (dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`);
+              let storedLinkedinUrl = dm.linkedinUrl ?? null;
+              if (dm.duplicateStatus === "DUPLICATE" && storedLinkedinUrl) {
+                storedLinkedinUrl = storedLinkedinUrl + `-dup-${Math.random().toString(36).substring(2, 6)}`;
+              }
 
-              const savedContact = await withRetry(() =>
-                prisma.contact.upsert({
+              // Check if contact already exists in this run
+              let existingContact = null;
+              if (storedLinkedinUrl) {
+                existingContact = await prisma.contact.findUnique({
                   where: {
                     runId_linkedinUrl: {
                       runId,
                       linkedinUrl: storedLinkedinUrl,
-                    },
-                  },
-                  create: {
+                    }
+                  }
+                });
+              } else {
+                existingContact = await prisma.contact.findFirst({
+                  where: {
                     runId,
-                    companyId: savedCompany.id,
-                    firstName: dm.firstName,
-                    lastName: dm.lastName,
                     fullName: dm.fullName,
-                    title: dm.title,
-                    linkedinUrl: storedLinkedinUrl,
-                    qualityScore: dm.qualityScore,
-                    status: dm.status,
-                    reason: dm.reason,
-                    duplicateStatus: dm.duplicateStatus,
-                  },
-                  update: { 
-                    title: dm.title,
-                    qualityScore: dm.qualityScore,
-                    status: dm.status,
-                    reason: dm.reason,
-                    duplicateStatus: dm.duplicateStatus,
-                  },
-                })
-              );
+                    companyId: savedCompany.id,
+                  }
+                });
+              }
+
+              let savedContact;
+              if (existingContact) {
+                savedContact = await withRetry(() =>
+                  prisma.contact.update({
+                    where: { id: existingContact.id },
+                    data: {
+                      title: dm.title,
+                      qualityScore: dm.qualityScore,
+                      status: dm.status,
+                      reason: dm.reason,
+                      duplicateStatus: dm.duplicateStatus,
+                      provider: isFallback ? "apollo-fallback" : "prospeo",
+                      failoverReason: isFallback ? "prospeo-rate-limit" : null,
+                    }
+                  })
+                );
+              } else {
+                savedContact = await withRetry(() =>
+                  prisma.contact.create({
+                    data: {
+                      runId,
+                      companyId: savedCompany.id,
+                      firstName: dm.firstName,
+                      lastName: dm.lastName,
+                      fullName: dm.fullName,
+                      title: dm.title,
+                      linkedinUrl: storedLinkedinUrl,
+                      qualityScore: dm.qualityScore,
+                      status: dm.status,
+                      reason: dm.reason,
+                      duplicateStatus: dm.duplicateStatus,
+                      provider: isFallback ? "apollo-fallback" : "prospeo",
+                      failoverReason: isFallback ? "prospeo-rate-limit" : null,
+                    }
+                  })
+                );
+              }
               successfulUpserts.push(savedContact);
 
               if (dm.email) {
                 const realEmail = dm.email;
+                const emailReasoning = isFallback
+                  ? "Real email obtained from legitimate source (Apollo API Fallback)"
+                  : "Real email obtained from legitimate source (Prospeo API)";
+
                 await withRetry(() =>
                   prisma.verifiedEmail.upsert({
                     where: {
@@ -210,12 +267,12 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                       contactId: savedContact.id,
                       email: realEmail,
                       status: "VALID",
-                      reasoning: "Real email obtained from legitimate source (Prospeo API)",
+                      reasoning: emailReasoning,
                       verifiedAt: new Date(),
                     },
                     update: {
                       status: "VALID",
-                      reasoning: "Real email obtained from legitimate source (Prospeo API)",
+                      reasoning: emailReasoning,
                       verifiedAt: new Date(),
                     },
                   })
@@ -229,7 +286,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
           validContacts.push(...successfulUpserts);
           console.log(`[Stage 2] Saved ${successfulUpserts.length} contacts progressively for ${company.domain}`);
         } catch (err: any) {
-          console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain}:`, err.message ?? err);
+          console.error(`[Stage 2] Processing contacts failed for company ${company.domain}:`, err.message ?? err);
         }
         return null;
       });
@@ -237,9 +294,9 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     await pLimit(companyTasks, 1);
     console.log(`[Stage 2] Total progressive contacts saved: ${validContacts.length}`);
 
-    // ─── Stage 3: EazyReach — Email Discovery (Prospeo Only) ───────────
+    // ─── Stage 3: EazyReach — Email Discovery ──────────────────────────
     await updateStage(runId, 3);
-    console.log(`[Stage 3] Gathering Prospeo emails for outreach...`);
+    console.log(`[Stage 3] Gathering provider-sourced emails for outreach...`);
 
     const sortedContacts = [...validContacts]
       .filter((c) => c.status === "SELECTED")
@@ -254,13 +311,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       const company = validCompanies.find((c) => c.id === contact.companyId);
       if (!company) continue;
 
-      // Fetch real email saved in Stage 2 from Prospeo
+      // Fetch real email saved in Stage 2 from provider
       const existingEmail = await prisma.verifiedEmail.findFirst({
         where: { contactId: contact.id },
       });
 
       if (existingEmail) {
-        console.log(`[Stage 3] Found Prospeo email for ${contact.fullName}: ${existingEmail.email}`);
+        console.log(`[Stage 3] Found provider-sourced email for ${contact.fullName}: ${existingEmail.email}`);
         verifiedEmails.push({
           email: existingEmail.email,
           contactFullName: contact.fullName,
@@ -320,6 +377,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       contactsFound: validContacts.length,
       verifiedEmails: verifiedEmails.length,
       emailsReady: emailDrafts.length,
+      apolloFallbackActivated: validContacts.some(c => c.provider === "apollo-fallback"),
     };
 
     await withRetry(() =>

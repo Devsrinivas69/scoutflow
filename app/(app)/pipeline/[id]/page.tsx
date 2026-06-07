@@ -29,6 +29,7 @@ interface PipelineStatus {
     contactsFound: number;
     verifiedEmails: number;
     emailsReady: number;
+    apolloFallbackActivated?: boolean;
   };
   companies: Array<{ name: string; domain: string; industry?: string; country?: string }>;
   contacts: Array<{
@@ -49,6 +50,8 @@ interface PipelineStatus {
     reason?: string | null;
     duplicateStatus?: string;
     emailSource?: string;
+    provider?: string;
+    failoverReason?: string | null;
   }>;
   campaign: {
     id: string;
@@ -371,6 +374,27 @@ export default function MissionView() {
             </div>
           )}
 
+          {/* Fallback Banner */}
+          {(data.stats?.apolloFallbackActivated || data.contacts.some(c => c.provider === "apollo-fallback")) && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="panel border-[var(--brand-warning)] bg-[#000] mb-8"
+            >
+              <div className="panel-header bg-[rgba(255,181,71,0.05)] border-b border-[var(--brand-warning)]">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-[var(--brand-warning)] animate-pulse" />
+                  <span className="font-mono text-sm uppercase text-[var(--brand-warning)] font-bold">
+                    Prospeo Rate Limited — Apollo Activated
+                  </span>
+                </div>
+              </div>
+              <div className="p-6 font-mono text-sm text-[var(--brand-text)] leading-relaxed">
+                Primary provider Prospeo returned HTTP 429. Emergency failover pipeline successfully routed contact discovery through Apollo.
+              </div>
+            </motion.div>
+          )}
+
           {data.contacts.length > 0 && (
             <div className="panel">
               <div className="panel-header">
@@ -400,7 +424,7 @@ export default function MissionView() {
                             {c.email && (
                               <>
                                 <span className="text-[var(--brand-border)] font-normal text-[10px]">•</span>
-                                <span className={`font-mono text-[11px] ${c.email === "No email available from Prospeo" ? "text-[var(--brand-error)]" : "text-[var(--brand-success)] font-medium bg-[rgba(34,197,94,0.03)] px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.1)]"}`}>
+                                <span className={`font-mono text-[11px] ${c.email.startsWith("No email available") ? "text-[var(--brand-error)]" : "text-[var(--brand-success)] font-medium bg-[rgba(34,197,94,0.03)] px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.1)]"}`}>
                                   {c.email}
                                 </span>
                               </>
@@ -416,13 +440,17 @@ export default function MissionView() {
                               </span>
                             )}
                           </div>
-                        ) : c.email && c.email !== "No email available from Prospeo" ? (
+                        ) : c.email && !c.email.startsWith("No email available") ? (
                           <div className="flex flex-col items-end gap-1">
                             <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded bg-[rgba(34,197,94,0.05)] font-bold">REAL EMAIL</span>
-                            <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">Verified Source</span>
+                            <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
+                              {c.provider === "apollo-fallback" ? "Apollo Fallback" : "Prospeo"}
+                            </span>
                           </div>
                         ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
-                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">No email available from Prospeo</span>
+                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">
+                            {c.email || "No email available"}
+                          </span>
                         ) : (
                           <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
                         )}
@@ -457,6 +485,18 @@ export default function MissionView() {
                               </span>
                             </div>
                             <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Contact Source:</span>
+                              <span className={`text-[var(--brand-text)] uppercase font-semibold ${c.provider === "apollo-fallback" ? "text-[var(--brand-warning)]" : "text-[var(--brand-success)]"}`}>
+                                {c.provider === "apollo-fallback" ? "Apollo Fallback" : "Prospeo"}
+                              </span>
+                            </div>
+                            {c.failoverReason && (
+                              <div>
+                                <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Failover Reason:</span>
+                                <span className="text-[var(--brand-warning)]">{c.failoverReason}</span>
+                              </div>
+                            )}
+                            <div>
                               <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Quality Audit Score:</span>
                               {c.qualityScore !== undefined ? (
                                 <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${c.qualityScore >= 80 ? "bg-[rgba(34,197,94,0.1)] text-[var(--brand-success)]" : c.qualityScore >= 60 ? "bg-[rgba(245,158,11,0.1)] text-[var(--brand-warning)]" : "bg-[rgba(239,68,68,0.1)] text-[var(--brand-error)]"}`}>
@@ -479,12 +519,12 @@ export default function MissionView() {
 
                           <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[var(--brand-border)] text-[9px] uppercase tracking-wider font-semibold">
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && c.email !== "No email available from Prospeo" ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
-                              DB Stored: {c.email && c.email !== "No email available from Prospeo" ? "YES" : "NO"}
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && !c.email.startsWith("No email available") ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              DB Stored: {c.email && !c.email.startsWith("No email available") ? "YES" : "NO"}
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && c.email !== "No email available from Prospeo" ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
-                              API Returned: {c.email && c.email !== "No email available from Prospeo" ? "YES" : "NO"}
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && !c.email.startsWith("No email available") ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              API Returned: {c.email && !c.email.startsWith("No email available") ? "YES" : "NO"}
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-success)]" />

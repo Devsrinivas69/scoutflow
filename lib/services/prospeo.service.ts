@@ -13,6 +13,13 @@ export interface DecisionMaker {
   email?: string;
 }
 
+export class RateLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RateLimitError";
+  }
+}
+
 /**
  * Run tasks with a concurrency limit (avoids thundering herd on external API)
  */
@@ -48,10 +55,15 @@ export async function findDecisionMakers(
   const tasks = companies.map(
     (company) => async () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
-      return withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
+      try {
+        return await withRetry(() => searchCompanyContacts(company, apiKey));
+      } catch (err) {
+        if (err instanceof RateLimitError || (err instanceof Error && (err.message.includes("429") || err.message.toLowerCase().includes("rate limit")))) {
+          throw err;
+        }
         console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
         return [];
-      });
+      }
     }
   );
 
@@ -63,6 +75,11 @@ async function searchCompanyContacts(
   company: LookalikeCompany,
   apiKey: string
 ): Promise<DecisionMaker[]> {
+  if (process.env.MOCK_PROSPEO_429 === "true") {
+    console.log(`[Simulation] Force Simulating Prospeo 429 Rate Limit for ${company.domain}`);
+    throw new RateLimitError(`[Simulation] Prospeo API rate limit exceeded (429) for ${company.domain}`);
+  }
+
   const cacheKey = `prospeo:contacts:${company.domain}`;
   const cached = await getCached<DecisionMaker[]>(cacheKey);
   if (cached) {
@@ -98,6 +115,9 @@ async function searchCompanyContacts(
 
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 429) {
+      throw new RateLimitError(`Prospeo API rate limit exceeded (429) for ${company.domain}`);
+    }
     throw new Error(`Prospeo API error ${response.status} for ${company.domain}: ${text}`);
   }
 

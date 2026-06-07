@@ -93,7 +93,7 @@ export async function GET(
         }
 
         let cleanLinkedinUrl = null;
-        if (c.linkedinUrl && !c.linkedinUrl.startsWith("mock-")) {
+        if (c.linkedinUrl) {
           cleanLinkedinUrl = c.linkedinUrl.includes("-dup-")
             ? c.linkedinUrl.split("-dup-")[0]
             : c.linkedinUrl;
@@ -105,7 +105,7 @@ export async function GET(
           firstName: c.firstName,
           lastName: c.lastName,
           title: c.title,
-          email: ve?.email ?? "No email available from Prospeo",
+          email: ve?.email ?? (c.provider === "apollo-fallback" ? "No email available from Apollo Fallback" : "No email available from Prospeo"),
           patternUsed: ve?.patternUsed ?? null,
           confidenceScore: ve?.confidenceScore ?? null,
           reasoning: ve?.reasoning ?? null,
@@ -116,6 +116,8 @@ export async function GET(
           status: c.status,
           reason: c.reason,
           duplicateStatus: c.duplicateStatus,
+          provider: c.provider,
+          failoverReason: c.failoverReason,
           emailSource,
         };
       }),

@@ -107,7 +107,7 @@ export function auditAndScoreContacts(
     }
 
     // 3. LinkedIn Validation
-    const hasLinkedIn = contact.linkedinUrl && !contact.linkedinUrl.startsWith("mock-");
+    const hasLinkedIn = !!contact.linkedinUrl;
     if (hasLinkedIn) {
       score = Math.min(100, score + 5);
       auditNotes.push("LinkedIn profile verified");
@@ -129,7 +129,7 @@ export function auditAndScoreContacts(
     const nameCompanyKey = `${normalizedName}_${companyName}`;
 
     const isDuplicateEmail = email && seenEmails.has(email);
-    const isDuplicateLinkedin = cleanLinkedinUrl && !cleanLinkedinUrl.startsWith("mock-") && seenLinkedInUrls.has(cleanLinkedinUrl);
+    const isDuplicateLinkedin = cleanLinkedinUrl && seenLinkedInUrls.has(cleanLinkedinUrl);
     const isDuplicateNameCompany = seenNameCompany.has(nameCompanyKey);
 
     if (isDuplicateEmail || isDuplicateLinkedin || isDuplicateNameCompany) {
@@ -139,7 +139,7 @@ export function auditAndScoreContacts(
       rejectNotes.push("Duplicate contact profile detected");
     } else {
       if (email) seenEmails.add(email);
-      if (cleanLinkedinUrl && !cleanLinkedinUrl.startsWith("mock-")) {
+      if (cleanLinkedinUrl) {
         seenLinkedInUrls.add(cleanLinkedinUrl);
       }
       seenNameCompany.add(nameCompanyKey);

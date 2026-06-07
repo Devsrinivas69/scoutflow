@@ -153,6 +153,8 @@ model Contact {
   status          String         @default("SELECTED") // "SELECTED" | "REJECTED"
   reason          String?                             // Explanation of selecting or rejecting
   duplicateStatus String         @default("ORIGINAL") // "ORIGINAL" | "DUPLICATE"
+  provider          String         @default("prospeo")
+  failoverReason    String?
   verifiedEmails  VerifiedEmail[]
   emailLogs       EmailLog[]
   createdAt       DateTime       @default(now())
