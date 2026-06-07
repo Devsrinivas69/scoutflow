@@ -30,18 +30,18 @@ export async function findLookalikeCompanies(
     }
 
     const companies = await withRetry(async () => {
-      const response = await fetchWithTimeout("https://api.ocean.io/v1/lookalikes", {
+      const response = await fetchWithTimeout("https://api.ocean.io/v3/search/companies", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          "X-Api-Token": apiKey,
         },
+        timeoutMs: 30000,
         body: JSON.stringify({
-          domain: seedDomain,
-          limit: 25,
-          filters: {
-            has_email: true,
-          },
+          size: 25,
+          companiesFilters: {
+            lookalikeDomains: [seedDomain]
+          }
         }),
       });
 
@@ -55,17 +55,18 @@ export async function findLookalikeCompanies(
       const data = await response.json();
 
       // Map Ocean.io response to our normalized shape
-      const mapped: LookalikeCompany[] = (data.companies ?? data.results ?? []).map(
-        (c: Record<string, unknown>) => ({
-          name: (c.name ?? c.company_name ?? "") as string,
-          domain: (c.domain ?? c.website_domain ?? "") as string,
-          industry: (c.industry ?? c.category ?? undefined) as string | undefined,
-          headcount: (c.headcount ?? c.employee_count ?? undefined) as string | undefined,
-          country: (c.country ?? (c.location as Record<string, unknown>)?.country ?? undefined) as string | undefined,
-          website: (c.website ?? c.website_url ?? undefined) as string | undefined,
-          linkedinUrl: (c.linkedin_url ?? c.linkedin ?? undefined) as string | undefined,
-        })
-      );
+      const mapped: LookalikeCompany[] = (data.companies ?? []).map((item: any) => {
+        const c = item.company ?? {};
+        return {
+          name: (c.name ?? "") as string,
+          domain: (c.domain ?? "") as string,
+          industry: (c.industries?.[0] ?? undefined) as string | undefined,
+          headcount: (c.employeeCountOcean ?? c.employeeCountLinkedin ?? undefined)?.toString() as string | undefined,
+          country: (c.locations?.[0]?.country ?? undefined) as string | undefined,
+          website: (c.rootUrl ?? c.website ?? undefined) as string | undefined,
+          linkedinUrl: (c.medias?.linkedin?.url ?? undefined) as string | undefined,
+        };
+      });
 
       return mapped;
     });
