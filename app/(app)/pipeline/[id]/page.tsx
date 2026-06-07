@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import {
   Search, Users, Shield, Mail, CheckCircle, Clock,
   AlertCircle, Loader2, Send, Globe, Check, ExternalLink,
-  AlertTriangle, Zap, Info,
+  AlertTriangle, Zap, Info, RefreshCw,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import useSWR from "swr";
@@ -189,6 +189,7 @@ export default function MissionView() {
 
   const [showApproval, setShowApproval] = useState(false);
   const [expandedContactId, setExpandedContactId] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const { data, error, mutate } = useSWR<PipelineStatus>(
     `/api/pipeline/${runId}/status`,
@@ -219,6 +220,24 @@ export default function MissionView() {
       }
     } catch (err) {
       console.error("[Approve] Error:", err);
+    }
+  };
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      const res = await fetch(`/api/pipeline/${runId}/retry`, { method: "POST" });
+      if (res.ok) {
+        await mutate();
+        setShowApproval(true);
+      } else {
+        const body = await res.json();
+        console.error("[Retry] Failed:", body.error);
+      }
+    } catch (err) {
+      console.error("[Retry] Error:", err);
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -539,6 +558,26 @@ export default function MissionView() {
                       </div>
                     ))}
                   </div>
+                  {/* Retry button */}
+                  <div className="pt-2">
+                    <button
+                      id="retry-delivery-btn"
+                      onClick={handleRetry}
+                      disabled={isRetrying}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--brand-primary)] text-black font-bold text-xs uppercase tracking-wide hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isRetrying ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      {isRetrying ? "Resetting…" : "Retry Delivery"}
+                    </button>
+                    <p className="text-[var(--brand-muted)] text-[10px] font-mono mt-1.5">
+                      Resets campaign to approval stage — no pipeline re-run needed.
+                    </p>
+                  </div>
+
               </div>
             </motion.div>
           )})()}
