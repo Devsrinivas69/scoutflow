@@ -46,6 +46,10 @@ interface PipelineStatus {
     companyName?: string;
     companyDomain?: string;
     linkedinUrl?: string | null;
+    qualityScore?: number;
+    status?: string;
+    reason?: string | null;
+    duplicateStatus?: string;
   }>;
   campaign: {
     id: string;
@@ -399,7 +403,16 @@ export default function MissionView() {
                             </div>
                           )}
                         </div>
-                        {c.email && c.email !== "No verified email found" ? (
+                        {c.status === "REJECTED" ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-0.5 rounded">REJECTED</span>
+                            {c.qualityScore !== undefined && (
+                              <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
+                                Score: {c.qualityScore}/100
+                              </span>
+                            )}
+                          </div>
+                        ) : c.email && c.email !== "No verified email found" ? (
                           <div className="flex flex-col items-end gap-1">
                             <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded">PREDICTED</span>
                             {c.confidenceScore && (
@@ -438,8 +451,24 @@ export default function MissionView() {
                               <span className="text-[var(--brand-text)]">{c.name}</span>
                             </div>
                             <div>
-                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Confidence Score:</span>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Guesser Confidence:</span>
                               <span className="text-[var(--brand-text)]">{c.confidenceScore || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Quality Audit Score:</span>
+                              {c.qualityScore !== undefined ? (
+                                <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${c.qualityScore >= 80 ? "bg-[rgba(34,197,94,0.1)] text-[var(--brand-success)]" : c.qualityScore >= 60 ? "bg-[rgba(245,158,11,0.1)] text-[var(--brand-warning)]" : "bg-[rgba(239,68,68,0.1)] text-[var(--brand-error)]"}`}>
+                                  {c.qualityScore}/100
+                                </span>
+                              ) : (
+                                <span className="text-[var(--brand-text)]">N/A</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Duplicate Status:</span>
+                              <span className={`text-[var(--brand-text)] ${c.duplicateStatus === "DUPLICATE" ? "text-[var(--brand-error)] font-bold" : ""}`}>
+                                {c.duplicateStatus || "ORIGINAL"}
+                              </span>
                             </div>
                           </div>
 
@@ -464,6 +493,15 @@ export default function MissionView() {
                               })()}
                             </div>
                           </div>
+
+                          {c.reason && (
+                            <div className="pt-2">
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Contact Quality Decision Reason:</span>
+                              <div className={`p-2.5 rounded border text-[10px] leading-relaxed ${c.status === "REJECTED" ? "text-[var(--brand-error)] bg-[rgba(239,68,68,0.05)] border-[rgba(239,68,68,0.2)]" : "text-[var(--brand-success)] bg-[rgba(34,197,94,0.05)] border-[rgba(34,197,94,0.2)]"}`}>
+                                {c.reason}
+                              </div>
+                            </div>
+                          )}
 
                           {c.reasoning && (
                             <div className="pt-2">

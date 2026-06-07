@@ -98,7 +98,13 @@ export async function GET(
           reasoning: ve?.reasoning ?? null,
           companyName: c.company.name,
           companyDomain: c.company.domain,
-          linkedinUrl: c.linkedinUrl,
+          linkedinUrl: c.linkedinUrl && c.linkedinUrl.includes("-dup-")
+            ? c.linkedinUrl.split("-dup-")[0]
+            : c.linkedinUrl,
+          qualityScore: c.qualityScore,
+          status: c.status,
+          reason: c.reason,
+          duplicateStatus: c.duplicateStatus,
         };
       }),
       campaign: campaign

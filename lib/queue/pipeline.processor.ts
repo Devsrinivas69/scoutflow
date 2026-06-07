@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
 import { findDecisionMakers } from "@/lib/services/prospeo.service";
+import { auditAndScoreContacts } from "@/lib/services/contact-audit.service";
 import { resolveWorkEmails } from "@/lib/services/eazyreach.service";
 import { withRetry } from "@/lib/utils/retry";
 import {
@@ -157,17 +158,22 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
         try {
           const contacts = await findDecisionMakers([company]);
+          const auditedContacts = auditAndScoreContacts(contacts, company.domain);
           const successfulUpserts = [];
-          for (const dm of contacts) {
-            const normalizedName = dm.fullName.replace(/\s+/g, '-').toLowerCase();
+          
+          for (const dm of auditedContacts) {
             try {
+              // Appending duplicate identifier suffix ensures we bypass unique constraint violations and display duplicates in diagnostics panel
+              const storedLinkedinUrl = dm.duplicateStatus === "DUPLICATE"
+                ? (dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`) + `-dup-${Math.random().toString(36).substring(2, 6)}`
+                : (dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`);
+
               const savedContact = await withRetry(() =>
                 prisma.contact.upsert({
                   where: {
                     runId_linkedinUrl: {
                       runId,
-                      linkedinUrl:
-                        dm.linkedinUrl ?? `mock-${dm.fullName}-${dm.companyDomain}`,
+                      linkedinUrl: storedLinkedinUrl,
                     },
                   },
                   create: {
@@ -177,9 +183,19 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                     lastName: dm.lastName,
                     fullName: dm.fullName,
                     title: dm.title,
-                    linkedinUrl: dm.linkedinUrl,
+                    linkedinUrl: storedLinkedinUrl,
+                    qualityScore: dm.qualityScore,
+                    status: dm.status,
+                    reason: dm.reason,
+                    duplicateStatus: dm.duplicateStatus,
                   },
-                  update: { title: dm.title },
+                  update: { 
+                    title: dm.title,
+                    qualityScore: dm.qualityScore,
+                    status: dm.status,
+                    reason: dm.reason,
+                    duplicateStatus: dm.duplicateStatus,
+                  },
                 })
               );
               successfulUpserts.push(savedContact);
@@ -202,12 +218,14 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     await updateStage(runId, 3);
     console.log(`[Stage 3] Discovering email patterns progressively...`);
 
-    // Sort contacts by priority score (highest score first) so high-value titles are processed first
-    const sortedContacts = [...validContacts].sort((a, b) => {
-      const scoreA = getContactPriorityScore(a.title);
-      const scoreB = getContactPriorityScore(b.title);
-      return scoreB - scoreA;
-    });
+    // Sort contacts by priority score (highest score first) so high-value titles are processed first, filtering for SELECTED status
+    const sortedContacts = [...validContacts]
+      .filter((c) => c.status === "SELECTED")
+      .sort((a, b) => {
+        const scoreA = getContactPriorityScore(a.title);
+        const scoreB = getContactPriorityScore(b.title);
+        return scoreB - scoreA;
+      });
 
     const verifiedEmails: any[] = [];
     for (const contact of sortedContacts) {

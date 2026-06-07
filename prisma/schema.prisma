@@ -139,19 +139,23 @@ model Company {
 }
 
 model Contact {
-  id            String         @id @default(cuid())
-  runId         String
-  run           PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
-  companyId     String
-  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  firstName     String
-  lastName      String?
-  fullName      String?
-  title         String?
-  linkedinUrl   String?
-  verifiedEmails VerifiedEmail[]
-  emailLogs     EmailLog[]
-  createdAt     DateTime       @default(now())
+  id              String         @id @default(cuid())
+  runId           String
+  run             PipelineRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  firstName       String
+  lastName        String?
+  fullName        String?
+  title           String?
+  linkedinUrl     String?
+  qualityScore    Int            @default(100)
+  status          String         @default("SELECTED") // "SELECTED" | "REJECTED"
+  reason          String?                             // Explanation of selecting or rejecting
+  duplicateStatus String         @default("ORIGINAL") // "ORIGINAL" | "DUPLICATE"
+  verifiedEmails  VerifiedEmail[]
+  emailLogs       EmailLog[]
+  createdAt       DateTime       @default(now())
 
   @@unique([runId, linkedinUrl])
   @@index([runId])
