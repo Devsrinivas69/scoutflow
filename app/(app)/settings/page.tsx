@@ -18,10 +18,10 @@ function getApiKeyStatus() {
     },
 
     {
-      label: "Brevo",
-      var: "BREVO_API_KEY",
-      status: process.env.BREVO_API_KEY ? "Connected" : "Not Configured",
-      connected: !!process.env.BREVO_API_KEY,
+      label: "Resend",
+      var: "RESEND_API_KEY",
+      status: process.env.RESEND_API_KEY ? "Connected" : "Not Configured",
+      connected: !!process.env.RESEND_API_KEY,
     },
   ];
 }

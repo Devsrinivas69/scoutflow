@@ -97,7 +97,7 @@ interface PipelineStatus {
   }>;
 }
 
-function diagnoseBrevoError(errorMessage?: string | null): {
+function diagnoseResendError(errorMessage?: string | null): {
   title: string;
   description: string;
   badge: string;
@@ -107,7 +107,7 @@ function diagnoseBrevoError(errorMessage?: string | null): {
   if (!errorMessage) {
     return {
       title: "Unknown Delivery Failure",
-      description: "An unknown error occurred while sending emails via Brevo.",
+      description: "An unknown error occurred while sending emails via Resend.",
       badge: "Unknown Error",
       badgeColor: "error",
       showVerifyLink: false,
@@ -116,70 +116,50 @@ function diagnoseBrevoError(errorMessage?: string | null): {
 
   const errLower = errorMessage.toLowerCase();
 
-  if (errLower.includes("unauthorized_sender") || errLower.includes("sender") || errLower.includes("not verified") || errLower.includes("unverified")) {
+  if (errLower.includes("validation_error") || errLower.includes("not verified") || errLower.includes("unverified") || errLower.includes("sender") || errLower.includes("from")) {
     return {
-      title: "Sender Rejected",
-      description: "Brevo rejected the sender email. This happens when your BREVO_SENDER_EMAIL has not been added and verified in app.brevo.com under 'Senders & IPs'.",
-      badge: "Sender Rejected",
+      title: "Sender / Domain Unverified",
+      description: "Resend rejected the sender email. Ensure that the domain of your RESEND_FROM_EMAIL is registered and verified in the Resend Dashboard under 'Domains' with valid SPF, DKIM, and DMARC records.",
+      badge: "Unverified Domain",
       badgeColor: "error",
       showVerifyLink: true,
     };
   }
 
-  if (errLower.includes("unauthorized") || errLower.includes("api-key") || errLower.includes("api key") || errLower.includes("forbidden") || errLower.includes("api_key")) {
+  if (errLower.includes("unauthorized") || errLower.includes("api-key") || errLower.includes("api key") || errLower.includes("forbidden") || errLower.includes("api_key") || errLower.includes("restricted")) {
     return {
       title: "Authentication Error",
-      description: "The configured BREVO_API_KEY is invalid or unauthorized. Please verify the API key under Brevo -> Settings -> SMTP & API Keys.",
+      description: "The configured RESEND_API_KEY is invalid, expired, or unauthorized. Please verify your API key under Resend -> API Keys.",
       badge: "Authentication Error",
       badgeColor: "error",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("quota_exceeded") || errLower.includes("quota") || errLower.includes("limit") || errLower.includes("exceeded")) {
+  if (errLower.includes("quota") || errLower.includes("limit") || errLower.includes("exceeded") || errLower.includes("rate")) {
     return {
-      title: "Quota Exceeded",
-      description: "Brevo's daily sending limit has been exceeded. The Brevo Free plan allows a maximum of 300 emails per day.",
-      badge: "Quota Exceeded",
+      title: "Sending Limit Exceeded",
+      description: "Resend rate limits or daily quotas have been exceeded. Please check your Resend plan details in the Resend dashboard.",
+      badge: "Limit Exceeded",
       badgeColor: "warning",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("rate_limit") || errLower.includes("rate limit") || errLower.includes("too many requests") || errLower.includes("429")) {
-    return {
-      title: "Rate Limit Exceeded",
-      description: "Brevo API rate limit exceeded. The server is making requests too quickly.",
-      badge: "Rate Limit Exceeded",
-      badgeColor: "warning",
-      showVerifyLink: false,
-    };
-  }
-
-  if (errLower.includes("recipient") || (errLower.includes("invalid_parameter") && errLower.includes("to"))) {
+  if (errLower.includes("recipient") || errLower.includes("to") || errLower.includes("invalid_recipient")) {
     return {
       title: "Invalid Recipient",
-      description: "Brevo rejected the recipient email address. The recipient list may contain malformed or invalid email domains.",
+      description: "Resend rejected the recipient email address. The recipient list may contain invalid or syntactically incorrect emails.",
       badge: "Invalid Recipient",
       badgeColor: "warning",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("template")) {
-    return {
-      title: "Template Error",
-      description: "Brevo returned a template error. Ensure HTML and text templates are valid and don't contain unescaped dynamic parameters.",
-      badge: "Template Error",
-      badgeColor: "error",
-      showVerifyLink: false,
-    };
-  }
-
-  if (errLower.includes("invalid_parameter") || errLower.includes("payload") || errLower.includes("parameter")) {
+  if (errLower.includes("payload") || errLower.includes("parameter") || errLower.includes("validation")) {
     return {
       title: "Invalid Payload",
-      description: "The constructed payload does not meet Brevo's API requirements. Check API logs for details.",
+      description: "The constructed payload does not meet Resend's API requirements. Check Resend API docs or logs for details.",
       badge: "Invalid Payload",
       badgeColor: "error",
       showVerifyLink: false,
@@ -187,7 +167,7 @@ function diagnoseBrevoError(errorMessage?: string | null): {
   }
 
   return {
-    title: "Brevo API Error",
+    title: "Resend API Error",
     description: errorMessage,
     badge: "API Failure",
     badgeColor: "error",
@@ -200,7 +180,7 @@ const STAGES = [
   { num: 1, icon: Search, label: "Discovery", desc: "Ocean.io" },
   { num: 2, icon: Users, label: "Contacts", desc: "Prospeo" },
   { num: 3, icon: Shield, label: "EazyReach", desc: "Email Discovery" },
-  { num: 4, icon: Mail, label: "Outreach", desc: "Brevo" },
+  { num: 4, icon: Mail, label: "Outreach", desc: "Resend" },
 ];
 
 export default function MissionView() {
@@ -452,7 +432,7 @@ export default function MissionView() {
 
           {/* ── Delivery Failed — Beautiful Premium Alert ───────────── */}
           {data.campaign && (data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)) && (() => {
-            const diagnosis = diagnoseBrevoError(data.campaign.errorMessage);
+            const diagnosis = diagnoseResendError(data.campaign.errorMessage);
             const badgeColorClasses = 
               diagnosis.badgeColor === "error" 
                 ? "bg-[rgba(239,68,68,0.1)] border-[var(--brand-error)]/25 text-[var(--brand-error)]" 
@@ -489,21 +469,45 @@ export default function MissionView() {
                     <p className="text-[var(--brand-muted)] text-xs leading-relaxed mb-3">
                       {diagnosis.description}
                     </p>
+
+                    {/* Resend Diagnostic Details */}
+                    <div className="mt-4 pt-3 border-t border-white/5 grid grid-cols-2 gap-y-2 text-[11px] font-mono text-[var(--brand-muted)]">
+                      <div>Email Provider:</div>
+                      <div className="text-white font-semibold text-right">Resend</div>
+                      
+                      <div>Delivery Status:</div>
+                      <div className="text-[var(--brand-error)] font-semibold text-right">FAILED</div>
+                      
+                      {data.campaign.id && (
+                        <>
+                          <div>Campaign ID:</div>
+                          <div className="text-white text-right font-semibold truncate max-w-[150px] ml-auto" title={data.campaign.id}>{data.campaign.id}</div>
+                        </>
+                      )}
+                      
+                      {diagnosis.badge && (
+                        <>
+                          <div>Failure Reason:</div>
+                          <div className="text-white text-right font-semibold">{diagnosis.badge}</div>
+                        </>
+                      )}
+                    </div>
+
                     {diagnosis.showVerifyLink && (
-                      <div className="pt-1.5 space-y-3">
+                      <div className="pt-3 mt-3 border-t border-white/5 space-y-3">
                         <div className="text-[var(--brand-muted)] text-[11px] leading-relaxed">
                           Your sender address:{" "}
                           <code className="bg-black/40 px-1.5 py-0.5 rounded border border-white/10 text-[var(--brand-warning)] font-mono">
-                            {process.env.NEXT_PUBLIC_BREVO_SENDER_EMAIL ?? "contact@scout-flow.app"}
+                            {process.env.NEXT_PUBLIC_RESEND_FROM_EMAIL ?? "contact@scout-flow.app"}
                           </code>
                         </div>
                         <a
-                          href="https://app.brevo.com/senders/list"
+                          href="https://resend.com/domains"
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--brand-warning)] text-black text-[11px] font-bold uppercase tracking-wide hover:opacity-90 transition-opacity"
                         >
-                          Verify Sender on Brevo <ExternalLink className="w-3 h-3" />
+                          Verify Domain on Resend <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
                     )}
@@ -521,20 +525,20 @@ export default function MissionView() {
 
                 {/* Checklist */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                  {[
-                    { label: "API Key valid", hint: "Check Brevo → Settings → API" },
-                    { label: "SPF / DKIM set", hint: "Check DNS for scout-flow.app" },
-                    { label: "Daily quota OK", hint: "Brevo free plan: 300/day" },
-                  ].map((item) => (
-                    <div key={item.label} className="flex items-start gap-2 p-2.5 rounded border border-white/5 bg-white/[0.02]">
-                      <Info className="w-3 h-3 text-[var(--brand-muted)] mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-white text-[10px] font-semibold">{item.label}</p>
-                        <p className="text-[var(--brand-muted)] text-[9px] font-mono mt-0.5">{item.hint}</p>
+                    {[
+                      { label: "API Key valid", hint: "Check Resend → API Keys" },
+                      { label: "SPF / DKIM set", hint: "Check DNS for scout-flow.app" },
+                      { label: "Resend limits", hint: "Check limits in dashboard" },
+                    ].map((item) => (
+                      <div key={item.label} className="flex items-start gap-2 p-2.5 rounded border border-white/5 bg-white/[0.02]">
+                        <Info className="w-3 h-3 text-[var(--brand-muted)] mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-white text-[10px] font-semibold">{item.label}</p>
+                          <p className="text-[var(--brand-muted)] text-[9px] font-mono mt-0.5">{item.hint}</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
               </div>
             </motion.div>
           )})()}

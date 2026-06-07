@@ -215,7 +215,8 @@ model EmailLog {
   subject    String
   body       String      @db.Text
   status     EmailStatus @default(PENDING)
-  brevoMsgId String?
+  messageId  String?
+  provider   String      @default("resend")
   errorMessage String?
   requestJson  Json?
   responseJson Json?

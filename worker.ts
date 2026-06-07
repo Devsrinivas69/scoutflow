@@ -5,10 +5,16 @@
 import "dotenv/config";
 import "./lib/env"; // Enforce environment validation
 import { startWorker } from "./lib/queue/pipeline.worker";
+import { verifyAndLogResendEnvironment } from "./lib/services/resend.service";
 
 console.log("[ScoutFlow Worker] Starting...");
 console.log(`[ScoutFlow Worker] Environment: ${process.env.NODE_ENV ?? "development"}`);
 console.log(`[ScoutFlow Worker] Redis: ${process.env.REDIS_URL ?? "redis://localhost:6379"}`);
+
+// Run startup check for Resend configuration
+verifyAndLogResendEnvironment().catch((err) => {
+  console.error("[ScoutFlow Worker] Failed to run Resend startup validation:", err);
+});
 
 const worker = startWorker();
 

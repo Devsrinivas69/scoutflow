@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname),
   },
   env: {
-    NEXT_PUBLIC_BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL ?? "",
+    NEXT_PUBLIC_RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL ?? "",
   },
   experimental: {
     serverActions: {

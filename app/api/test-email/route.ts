@@ -22,16 +22,16 @@ export async function POST(req: NextRequest) {
     if (!apiKey || !fromEmail || !fromName) {
       return NextResponse.json({
         success: false,
-        error: "Missing one or more Resend environment variables on the server.",
+        error: "Missing one or more Resend environment variables.",
         envValidation,
       }, { status: 400 });
     }
 
-    // Pre-flight recipient check
+    // Pre-flight recipient validation
     if (!testRecipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testRecipient)) {
       return NextResponse.json({
         success: false,
-        error: `Invalid recipient email format: ${testRecipient}`,
+        error: `Invalid test recipient email: ${testRecipient}`,
         envValidation,
       }, { status: 400 });
     }
@@ -39,11 +39,9 @@ export async function POST(req: NextRequest) {
     const payload = {
       name: "Test Recipient",
       email: testRecipient,
-      subject: "Test Send from ScoutFlow Resend Integration Audit",
-      body: "This is a diagnostic email sent by the ScoutFlow system to verify SMTP and API key permissions with Resend.",
+      subject: "Test Send from ScoutFlow Resend Migration Audit",
+      body: "This is a diagnostic email sent by the ScoutFlow system to verify Resend delivery, SMTP keys, and domain DKIM records.",
     };
-
-    console.log(`[Test Delivery API] Triggering API call to Resend for recipient: ${testRecipient}`);
 
     const res = await sendSingleResendEmail(payload, {
       apiKey,
@@ -54,13 +52,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: res.success,
-      error: res.success ? undefined : res.error,
+      message: res.success ? "Test email accepted by Resend" : "Resend rejected the test email",
       statusCode: res.statusCode,
       responseJson: res.responseJson,
       envValidation,
     });
   } catch (error: any) {
-    console.error("[Test Delivery API] Error testing Resend credentials:", error);
+    console.error("[Test Email API] Exception:", error);
     return NextResponse.json({
       success: false,
       error: error.message || String(error),

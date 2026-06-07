@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
-import { sendOutreachEmails } from "@/lib/services/brevo.service";
+import { sendOutreachEmails } from "@/lib/services/email.provider";
 
 export async function POST(
   req: NextRequest,
@@ -81,22 +81,22 @@ export async function POST(
     });
 
     const actingUserId = session.user.id;
-    // [Brevo Trace Step 1/8] Campaign approved by user, starting async outreach pipeline.
-    console.log(`[Brevo Trace Step 1/8] Campaign approved for run ${runId} by user ${actingUserId}. Status changed to APPROVED.`);
+    // [Resend Trace Step 1/8] Campaign approved by user, starting async outreach pipeline.
+    console.log(`[Resend Trace Step 1/8] Campaign approved for run ${runId} by user ${actingUserId}. Status changed to APPROVED.`);
 
     // Respond immediately — don't block the HTTP request on email delivery
     // The actual sending happens asynchronously after response is sent
     void (async () => {
       try {
-        console.log(`[Brevo Trace] Campaign ${campaign.id} background worker started.`);
-        const brevoStart = Date.now();
+        console.log(`[Resend Trace] Campaign ${campaign.id} background worker started.`);
+        const resendStart = Date.now();
         
         // sendOutreachEmails handles Step 2 (Recipient Selection), Step 3 (Email Gen), Step 4 (Payload Build), Step 5 (API Request) & Step 6 (API Response).
         const results = await sendOutreachEmails(emailDrafts);
-        const brevoDuration = ((Date.now() - brevoStart) / 1000).toFixed(2);
-        console.log(`[Brevo Trace] Brevo batch completed for campaign ${campaign.id} in ${brevoDuration}s`);
+        const resendDuration = ((Date.now() - resendStart) / 1000).toFixed(2);
+        console.log(`[Resend Trace] Resend batch completed for campaign ${campaign.id} in ${resendDuration}s`);
 
-        console.log(`[Brevo Trace Step 7/8] Database Logging: saving logs to EmailLog model for campaign ${campaign.id}`);
+        console.log(`[Resend Trace Step 7/8] Database Logging: saving logs to EmailLog model for campaign ${campaign.id}`);
         // Save email logs
         const contacts = await prisma.contact.findMany({
           where: { runId },
@@ -110,7 +110,7 @@ export async function POST(
             );
             const draft = emailDrafts.find((d) => d.email === result.email);
             if (!contact || !draft) {
-              console.warn(`[Brevo Trace] Could not associate result for email ${result.email} with contact/draft.`);
+              console.warn(`[Resend Trace] Could not associate result for email ${result.email} with contact/draft.`);
               return;
             }
 
@@ -122,7 +122,8 @@ export async function POST(
                 subject: draft.subject,
                 body: draft.body,
                 status: result.success ? "SENT" : "FAILED",
-                brevoMsgId: result.messageId || null,
+                messageId: result.messageId || null,
+                provider: "resend",
                 errorMessage: result.error ?? null,
                 requestJson: result.requestJson ?? null,
                 responseJson: result.responseJson ?? null,
@@ -139,7 +140,7 @@ export async function POST(
           .map((r) => `[${r.email}]: ${r.error}`)
           .join(" | ");
         const campaignErrorMessage = failedCount > 0
-          ? (failureMessages || "Brevo delivery failed — check sender verification and API key")
+          ? (failureMessages || "Resend delivery failed — check SPF/DKIM verification and API key")
           : null;
 
         await prisma.campaign.update({
@@ -168,8 +169,8 @@ export async function POST(
           data: { status: finalStatus },
         });
 
-        // [Brevo Trace Step 8/8] UI Status is updated and audit logged.
-        console.log(`[Brevo Trace Step 8/8] UI Status: run ${runId} final status is ${finalStatus}. Approved, sent: ${sentCount}, failed: ${failedCount}.`);
+        // [Resend Trace Step 8/8] UI Status is updated and audit logged.
+        console.log(`[Resend Trace Step 8/8] UI Status: run ${runId} final status is ${finalStatus}. Approved, sent: ${sentCount}, failed: ${failedCount}.`);
 
         await prisma.auditLog.create({
           data: {

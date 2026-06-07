@@ -11,7 +11,7 @@ ScoutFlow is a production-grade outbound intelligence SaaS platform. Enter one c
 - 🔍 **Company Discovery** — Ocean.io finds 25+ lookalike companies
 - 👥 **Decision Maker Intelligence** — Prospeo identifies CEOs, VPs, Directors
 - ✅ **Email Retrieval** — Prospeo extracts real verified emails
-- ✉️ **Personalized Outreach** — Brevo sends tailored campaigns
+- ✉️ **Personalized Outreach** — Resend sends tailored campaigns
 - 🛡️ **Mandatory Approval Gate** — Emails never send without your approval
 - 📊 **Analytics Dashboard** — Delivery, open, and response rates
 - 📥 **Exports** — CSV and JSON for contacts and companies
@@ -27,7 +27,7 @@ ScoutFlow is a production-grade outbound intelligence SaaS platform. Enter one c
 | Database | PostgreSQL + Prisma ORM |
 | Queue | BullMQ + Redis |
 | Auth | NextAuth v5 |
-| Email | Brevo REST API |
+| Email | Resend REST API |
 | Deployment | Railway |
 
 ---
@@ -63,9 +63,10 @@ NEXTAUTH_SECRET="..."          # generate: openssl rand -base64 32
 NEXTAUTH_URL="http://localhost:3000"
 OCEAN_API_KEY="..."
 PROSPEO_API_KEY="..."
-BREVO_API_KEY="..."
-BREVO_SENDER_EMAIL="..."
-BREVO_SENDER_NAME="..."
+RESEND_API_KEY="..."
+RESEND_FROM_EMAIL="..."
+RESEND_FROM_NAME="..."
+# RESEND_REPLY_TO="..."
 ```
 
 ### 3. Setup Database
@@ -121,9 +122,10 @@ NEXTAUTH_SECRET=<generated>
 NEXTAUTH_URL=https://your-app.up.railway.app
 OCEAN_API_KEY=api_84fdAP_...
 PROSPEO_API_KEY=pk_ac492b67...
-BREVO_API_KEY=xkeysib-...
-BREVO_SENDER_EMAIL=contact@scout-flow.app
-BREVO_SENDER_NAME=ScoutFlow
+RESEND_API_KEY=re_LKgoVfzm...
+RESEND_FROM_EMAIL=contact@scout-flow.app
+RESEND_FROM_NAME=ScoutFlow
+RESEND_REPLY_TO=reddykph@gmail.com
 ```
 
 Copy the same variables to the **worker service**.
@@ -165,7 +167,7 @@ scoutflow/
 │       ├── campaigns/
 │       └── exports/
 ├── lib/
-│   ├── services/                   # Ocean, Prospeo, Brevo
+│   ├── services/                   # Ocean, Prospeo, Resend
 │   ├── queue/                      # BullMQ pipeline worker
 │   ├── db/prisma.ts                # Prisma singleton
 │   └── utils/                      # env validation, retry, email-template
@@ -189,7 +191,7 @@ User → /pipeline → enters domain
   → Status: PENDING_APPROVAL ← approval gate
   → User reviews + approves
   → POST /api/pipeline/[id]/approve
-  → Brevo sends emails
+  → Resend sends emails
   → Status: COMPLETED
 ```
 

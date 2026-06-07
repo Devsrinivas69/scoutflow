@@ -7,10 +7,10 @@ const envSchema = z.object({
   NEXTAUTH_URL: z.string().url("NEXTAUTH_URL must be a valid URL"),
   OCEAN_API_KEY: z.string().min(1, "OCEAN_API_KEY is required"),
   PROSPEO_API_KEY: z.string().min(1, "PROSPEO_API_KEY is required"),
-  BREVO_API_KEY: z.string().min(1, "BREVO_API_KEY is required"),
-  BREVO_SENDER_EMAIL: z.string().email("BREVO_SENDER_EMAIL must be a valid email"),
-  BREVO_SENDER_NAME: z.string().min(1, "BREVO_SENDER_NAME is required"),
-  BREVO_REPLY_TO_EMAIL: z.string().email("BREVO_REPLY_TO_EMAIL must be a valid email").optional(),
+  RESEND_API_KEY: z.string().min(1, "RESEND_API_KEY is required"),
+  RESEND_FROM_EMAIL: z.string().email("RESEND_FROM_EMAIL must be a valid email"),
+  RESEND_FROM_NAME: z.string().min(1, "RESEND_FROM_NAME is required"),
+  RESEND_REPLY_TO: z.string().email("RESEND_REPLY_TO must be a valid email").optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
