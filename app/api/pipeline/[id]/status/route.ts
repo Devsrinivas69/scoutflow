@@ -77,7 +77,10 @@ export async function GET(
           stats.verifiedEmails ??
           run.contacts.reduce((acc, c) => acc + c.verifiedEmails.length, 0),
         emailsReady: stats.emailsReady ?? 0,
+        apolloFallbackActivated: stats.apolloFallbackActivated ?? false,
       },
+      discoveryAudits: stats.discoveryAudits ?? [],
+      emailDisappearedAudits: stats.emailDisappearedAudits ?? [],
       companies: run.companies.slice(0, 10).map((c) => ({
         name: c.name,
         domain: c.domain,

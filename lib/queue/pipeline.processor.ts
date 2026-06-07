@@ -7,8 +7,9 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
-import { findDecisionMakers, RateLimitError } from "@/lib/services/prospeo.service";
+import { findDecisionMakers } from "@/lib/services/prospeo.service";
 import { findDecisionMakersApollo } from "@/lib/services/apollo.service";
+import type { ProviderResult } from "@/lib/services/provider.interface";
 import { auditAndScoreContacts } from "@/lib/services/contact-audit.service";
 import { withRetry } from "@/lib/utils/retry";
 import {
@@ -48,6 +49,7 @@ async function pLimit<T>(
         results[idx] = await tasks[idx]();
       } catch (err) {
         console.error(`[pLimit] Task error at index ${idx}:`, err);
+        throw err;
       }
     }
   }
@@ -163,58 +165,146 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     console.log(`[Milestone] Prospeo Started at ${new Date(stage2StartTime).toISOString()}`);
 
     const validContacts: any[] = [];
+    const companyAudits: any[] = [];
+
     const companyTasks = lookalikeCompanies
       .filter((c) => c.domain)
       .map((company) => async () => {
         const savedCompany = validCompanies.find((c) => c.domain === company.domain);
         if (!savedCompany) return null;
 
-        let contacts: any[] = [];
-        let isFallback = false;
+        let selectedContactsToSave: any[] = [];
+        let providerUsed: "prospeo" | "apollo-fallback" = "prospeo";
         let failoverReason: string | null = null;
+        let fallbackActivated = false;
+        
+        let prospeoResult: ProviderResult | null = null;
+        let apolloResult: ProviderResult | null = null;
 
+        // 1. Call Prospeo
         try {
-          contacts = await findDecisionMakers([company]);
+          prospeoResult = await findDecisionMakers(company);
         } catch (err: any) {
-          const isFallbackTrigger =
-            err.name === "RateLimitError" ||
-            err.message?.includes("429") ||
-            err.message?.toLowerCase().includes("rate limit") ||
-            err.message?.includes("403") ||
-            err.message?.includes("500") ||
-            err.message?.includes("502") ||
-            err.message?.includes("503") ||
-            err.message?.includes("504") ||
-            err.message?.toLowerCase().includes("timeout") ||
-            err.message?.toLowerCase().includes("abort");
-
-          if (isFallbackTrigger) {
-            const reason = (err.name === "RateLimitError" || err.message?.includes("429")) ? "prospeo-rate-limit" : "prospeo-api-error";
-            console.warn(`[Stage 2] Prospeo failed (Error: ${err.message}) for ${company.domain}. Activating Apollo fallback...`);
-            isFallback = true;
-            failoverReason = reason;
-            try {
-              console.log(`[Milestone] Apollo Fallback Started for ${company.domain}`);
-              const startApollo = Date.now();
-              contacts = await findDecisionMakersApollo([company]);
-              const apolloDuration = ((Date.now() - startApollo) / 1000).toFixed(2);
-              console.log(`[Milestone] Apollo Fallback Completed for ${company.domain} in ${apolloDuration}s`);
-            } catch (apolloErr: any) {
-              console.error(`[Stage 2] Apollo fallback also failed for ${company.domain}:`, apolloErr.message ?? apolloErr);
-            }
-          } else {
-            console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain} with non-fallback error:`, err.message ?? err);
-          }
+          prospeoResult = {
+            contacts: [],
+            metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
+            rawRequest: { filters: { company: { websites: { include: [company.domain] } } } },
+            rawResponse: null,
+            status: err.name === "RateLimitError" || err.message?.includes("429") ? "rate_limited" : "api_error",
+            errorMessage: err.message ?? "Unknown error",
+          };
         }
 
+        // Fallback condition: rate limit, API error, or 0 contacts returned
+        const shouldFallback = 
+          prospeoResult.status === "rate_limited" || 
+          prospeoResult.status === "api_error" ||
+          prospeoResult.status === "zero_results" ||
+          prospeoResult.contacts.length === 0;
+
+        if (shouldFallback) {
+          fallbackActivated = true;
+          if (prospeoResult.status === "zero_results" || prospeoResult.contacts.length === 0) {
+            failoverReason = "prospeo-zero-results";
+            console.log(`[Zero-Result Investigation] Prospeo returned 0 contacts for ${company.domain}. Request: ${JSON.stringify(prospeoResult.rawRequest)}, Response: ${JSON.stringify(prospeoResult.rawResponse)}. Triggering Apollo Verification Search...`);
+          } else if (prospeoResult.status === "rate_limited") {
+            failoverReason = "prospeo-rate-limit";
+            console.warn(`[Stage 2] Prospeo rate limited (429) for ${company.domain}. Activating Apollo fallback...`);
+          } else {
+            failoverReason = "prospeo-api-error";
+            console.warn(`[Stage 2] Prospeo API error (${prospeoResult.errorMessage}) for ${company.domain}. Activating Apollo fallback...`);
+          }
+
+          // Emergency failover to Apollo
+          try {
+            apolloResult = await findDecisionMakersApollo(company);
+          } catch (err: any) {
+            apolloResult = {
+              contacts: [],
+              metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
+              rawRequest: { q_organization_domains: [company.domain] },
+              rawResponse: null,
+              status: "api_error",
+              errorMessage: err.message ?? "Unknown error",
+            };
+          }
+
+          // Fail loudly if Apollo key is forbidden (e.g. Free key 403 API_INACCESSIBLE)
+          if (apolloResult.status === "forbidden") {
+            throw new Error(`Apollo fallback failed: API Forbidden (403 API_INACCESSIBLE). Your Apollo API Key requires a paid plan to use mixed_people/search. Details: ${apolloResult.errorMessage}`);
+          }
+
+          // Determine better result set
+          const useApollo = apolloResult.contacts.length > 0 || 
+            (prospeoResult.status !== "success" && apolloResult.status === "success");
+
+          if (useApollo) {
+            selectedContactsToSave = apolloResult.contacts;
+            providerUsed = "apollo-fallback";
+          } else {
+            selectedContactsToSave = prospeoResult.contacts;
+            providerUsed = "prospeo";
+            if (apolloResult.status === "zero_results" || apolloResult.contacts.length === 0) {
+              console.warn(`[Zero-Result Investigation] Apollo Verification also returned 0 contacts for ${company.domain}. Request: ${JSON.stringify(apolloResult.rawRequest)}, Response: ${JSON.stringify(apolloResult.rawResponse)}.`);
+            } else {
+              console.error(`[Stage 2] Apollo fallback failed for ${company.domain}: ${apolloResult.errorMessage}`);
+            }
+          }
+        } else {
+          selectedContactsToSave = prospeoResult.contacts;
+          providerUsed = "prospeo";
+        }
+
+        // Auditing and scoring
         try {
-          let auditedContacts = auditAndScoreContacts(contacts, company.domain);
+          let auditedContacts = auditAndScoreContacts(selectedContactsToSave, company.domain);
           if (process.env.TEST_MODE === "true") {
             console.log(`[Test Mode] Limiting contacts to 2 to speed up validation and prevent DB timeouts`);
             auditedContacts = auditedContacts.slice(0, 2);
           }
+
+          const rejectionBreakdown: Record<string, number> = {};
+          auditedContacts.forEach(c => {
+            if (c.status === "REJECTED") {
+              const cat = c.rejectionReasonCategory ?? "other";
+              rejectionBreakdown[cat] = (rejectionBreakdown[cat] ?? 0) + 1;
+            }
+          });
+
+          const activeResult = providerUsed === "apollo-fallback" ? apolloResult! : prospeoResult!;
+          const savedCount = auditedContacts.length;
+          const filteredCount = auditedContacts.filter(c => c.status === "REJECTED").length;
+          const displayedCount = auditedContacts.filter(c => c.status === "SELECTED").length;
+          const emailsSavedCount = auditedContacts.filter(c => c.status === "SELECTED" && c.email).length;
+
+          companyAudits.push({
+            domain: company.domain,
+            providerUsed,
+            status: activeResult.status,
+            fallbackActivated,
+            failoverReason,
+            rawContacts: activeResult.metrics.rawReturned,
+            contactsParsed: activeResult.metrics.parsed,
+            contactsSaved: savedCount,
+            contactsFiltered: filteredCount,
+            contactsDisplayed: displayedCount,
+            emailsReturned: activeResult.metrics.emailsReturned,
+            emailsParsed: activeResult.metrics.emailsParsed,
+            emailsSaved: emailsSavedCount,
+            rejectionReasons: rejectionBreakdown,
+            requestJson: activeResult.rawRequest,
+            responseJson: activeResult.rawResponse,
+            errorMessage: activeResult.errorMessage,
+          });
+
+          // Contact recovery audit logging
+          if (activeResult.metrics.rawReturned > 0 && displayedCount === 0) {
+            console.warn(`[Contact Recovery Audit Warning] Domain ${company.domain} returned ${activeResult.metrics.rawReturned} raw contacts, but 0 are displayed (SELECTED).
+              Exact code path removing contacts: auditAndScoreContacts in contact-audit.service.ts
+              Rejections breakdown: ${JSON.stringify(rejectionBreakdown)}`);
+          }
+
           const successfulUpserts = [];
-          
           for (const dm of auditedContacts) {
             try {
               let storedLinkedinUrl = dm.linkedinUrl ?? null;
@@ -222,7 +312,6 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                 storedLinkedinUrl = storedLinkedinUrl + `-dup-${Math.random().toString(36).substring(2, 6)}`;
               }
 
-              // Check if contact already exists in this run
               let existingContact = null;
               if (storedLinkedinUrl) {
                 existingContact = await prisma.contact.findUnique({
@@ -254,8 +343,8 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                       status: dm.status,
                       reason: dm.reason,
                       duplicateStatus: dm.duplicateStatus,
-                      provider: isFallback ? "apollo-fallback" : "prospeo",
-                      failoverReason: isFallback ? failoverReason : null,
+                      provider: providerUsed,
+                      failoverReason: fallbackActivated ? failoverReason : null,
                     }
                   })
                 );
@@ -274,8 +363,8 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                       status: dm.status,
                       reason: dm.reason,
                       duplicateStatus: dm.duplicateStatus,
-                      provider: isFallback ? "apollo-fallback" : "prospeo",
-                      failoverReason: isFallback ? failoverReason : null,
+                      provider: providerUsed,
+                      failoverReason: fallbackActivated ? failoverReason : null,
                     }
                   })
                 );
@@ -285,7 +374,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
               if (dm.email) {
                 const realEmail = dm.email;
-                const emailReasoning = isFallback
+                const emailReasoning = providerUsed === "apollo-fallback"
                   ? "Real email obtained from legitimate source (Apollo API Fallback)"
                   : "Real email obtained from legitimate source (Prospeo API)";
 
@@ -355,14 +444,12 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
     const verifiedEmails: any[] = [];
     
-    // Perform database lookup for verified emails inside a Promise.race timeout block for safety
     await Promise.race([
       (async () => {
         for (const contact of sortedContacts) {
           const company = validCompanies.find((c) => c.id === contact.companyId);
           if (!company) continue;
 
-          // Fetch real email saved in Stage 2 from provider
           const existingEmail = await prisma.verifiedEmail.findFirst({
             where: { contactId: contact.id },
           });
@@ -419,6 +506,32 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         }),
       }));
 
+    // Email Recovery Audit Warning
+    const disappearedEmails: any[] = [];
+    for (const contact of validContacts) {
+      if (contact.email && !emailDrafts.some(ed => ed.email === contact.email)) {
+        const isRejected = contact.status === "REJECTED";
+        disappearedEmails.push({
+          fullName: contact.fullName,
+          email: contact.email,
+          file: "pipeline.processor.ts",
+          function: "runPipeline",
+          filter: isRejected ? "contact.status === 'SELECTED' filter in Stage 3" : "email draft validation filter in Stage 4",
+          rejectionReason: contact.reason || "Unknown reason",
+        });
+      }
+    }
+
+    if (disappearedEmails.length > 0) {
+      console.warn(`[Email Recovery Audit Warning] ${disappearedEmails.length} emails disappeared during pipeline processing:`);
+      for (const de of disappearedEmails) {
+        console.warn(`  - Name: ${de.fullName}, Email: ${de.email}
+          File: ${de.file}, Function: ${de.function}
+          Filter: ${de.filter}
+          Rejection Reason: ${de.rejectionReason}`);
+      }
+    }
+
     const isApolloUsed = validContacts.some(c => c.provider === "apollo-fallback");
     const stats = {
       companiesFound: validCompanies.length,
@@ -427,12 +540,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       emailsReady: emailDrafts.length,
       apolloFallbackActivated: isApolloUsed,
       stage2TimedOut,
+      discoveryAudits: companyAudits,
+      emailDisappearedAudits: disappearedEmails,
     };
 
     const totalDuration = ((Date.now() - pipelineStartTime) / 1000).toFixed(2);
 
     if (emailDrafts.length === 0) {
-      // Continuation Logic: if 0 emails are ready, transition to COMPLETED_WITH_WARNINGS and Campaign FAILED
       await withRetry(() =>
         prisma.campaign.create({
           data: {
@@ -454,14 +568,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
             currentStage: 4,
             completedAt: new Date(),
             statsJson: stats,
-            errorMessage: "No contact emails found",
+            errorMessage: validContacts.length === 0 ? "Provider responded with no matching records." : "No contact emails found",
           },
         })
       );
 
       console.log(`[Milestone] Pipeline Completed with Warnings in ${totalDuration}s — No emails found. Run ID: ${runId}`);
     } else {
-      // Normal flow: transition to PENDING_APPROVAL
       await withRetry(() =>
         prisma.campaign.create({
           data: {

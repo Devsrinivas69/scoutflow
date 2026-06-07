@@ -63,6 +63,34 @@ interface PipelineStatus {
     failedCount?: number;
     errorMessage?: string | null;
   } | null;
+  discoveryAudits?: Array<{
+    domain: string;
+    providerUsed: string;
+    status: string;
+    fallbackActivated: boolean;
+    failoverReason: string | null;
+    rawContacts: number;
+    contactsParsed: number;
+    contactsSaved: number;
+    contactsFiltered: number;
+    contactsDisplayed: number;
+    emailsReturned: number;
+    emailsParsed: number;
+    emailsSaved: number;
+    emailsDisplayed: number;
+    rejectionReasons: Record<string, number>;
+    requestJson?: any;
+    responseJson?: any;
+    errorMessage?: string;
+  }>;
+  emailDisappearedAudits?: Array<{
+    fullName: string;
+    email: string;
+    file: string;
+    function: string;
+    filter: string;
+    rejectionReason: string;
+  }>;
 }
 
 const STAGES = [
@@ -409,6 +437,159 @@ export default function MissionView() {
                 Primary provider Prospeo returned HTTP 429. Emergency failover pipeline successfully routed contact discovery through Apollo.
               </div>
             </motion.div>
+          )}
+
+          {/* Provider Transparency & Telemetry Audit Dashboard */}
+          {data.discoveryAudits && data.discoveryAudits.length > 0 && (
+            <div className="panel border-[var(--brand-primary)]/40 bg-[#000] mb-8">
+              <div className="panel-header bg-[rgba(226,255,61,0.02)] border-b border-[var(--brand-border)] flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Shield className="w-5 h-5 text-[var(--brand-primary)]" />
+                  <span className="font-mono text-sm uppercase text-white font-bold">
+                    Discovery Audit & Transparency Telemetry
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-[var(--brand-muted)] uppercase">
+                  Zero-Result Prevention Active
+                </span>
+              </div>
+              <div className="p-6 space-y-6">
+                
+                {/* Email Disappeared Recovery Warnings */}
+                {data.emailDisappearedAudits && data.emailDisappearedAudits.length > 0 && (
+                  <div className="bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/30 rounded p-4 font-mono text-xs text-[var(--brand-error)] space-y-2">
+                    <div className="font-bold flex items-center gap-2 uppercase tracking-wider">
+                      <AlertCircle className="w-4 h-4 text-[var(--brand-error)]" />
+                      Email Disappearance Audit Warning
+                    </div>
+                    <p className="text-[var(--brand-muted)]">
+                      The contact auditor detected {data.emailDisappearedAudits.length} emails discovered but removed from final outreach.
+                    </p>
+                    <div className="divide-y divide-[var(--brand-error)]/10 pt-2">
+                      {data.emailDisappearedAudits.map((ea, idx) => (
+                        <div key={idx} className="py-2 first:pt-0 last:pb-0">
+                          <span className="text-white font-bold">{ea.fullName} ({ea.email})</span> was excluded by filter <code className="bg-black px-1.5 py-0.5 rounded border border-[var(--brand-border)] text-white">{ea.filter}</code> inside <code className="bg-black px-1.5 py-0.5 rounded border border-[var(--brand-border)] text-white">{ea.file}:{ea.function}</code>. 
+                          <span className="block mt-1 text-[var(--brand-muted)]">Rejection Reason: {ea.rejectionReason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Telemetry Matrix Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--brand-border)] text-[var(--brand-muted)] uppercase tracking-wider text-[10px]">
+                        <th className="pb-3 pr-4">Domain</th>
+                        <th className="pb-3 pr-4">Provider</th>
+                        <th className="pb-3 pr-4">Status</th>
+                        <th className="pb-3 pr-4 text-center">Contacts (Raw/Sel)</th>
+                        <th className="pb-3 pr-4 text-center">Emails (Raw/Sel)</th>
+                        <th className="pb-3 text-right">Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--brand-border)]/50">
+                      {data.discoveryAudits.map((audit, idx) => {
+                        const isApollo = audit.providerUsed === "apollo-fallback";
+                        const isZero = audit.contactsDisplayed === 0;
+                        return (
+                          <tr key={idx} className="hover:bg-[rgba(255,255,255,0.02)] transition-colors">
+                            <td className="py-3 pr-4 font-semibold text-white">{audit.domain}</td>
+                            <td className="py-3 pr-4">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${isApollo ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"}`}>
+                                {isApollo ? "Apollo" : "Prospeo"}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-4">
+                              <span className={`uppercase font-bold ${
+                                audit.status === "success" ? "text-emerald-500" :
+                                audit.status === "zero_results" ? "text-rose-500" :
+                                "text-rose-600 animate-pulse"
+                              }`}>
+                                {audit.status.replace(/_/g, " ")}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-4 text-center text-white">
+                              {audit.rawContacts} / <span className={isZero ? "text-rose-500" : "text-emerald-500"}>{audit.contactsDisplayed}</span>
+                            </td>
+                            <td className="py-3 pr-4 text-center text-white">
+                              {audit.emailsReturned} / <span className={audit.emailsSaved === 0 ? "text-rose-500" : "text-emerald-500"}>{audit.emailsSaved}</span>
+                            </td>
+                            <td className="py-3 text-right">
+                              <button 
+                                onClick={() => setExpandedContactId(expandedContactId === `audit-${idx}` ? null : `audit-${idx}`)}
+                                className="text-[var(--brand-primary)] hover:underline font-bold text-[10px] uppercase"
+                              >
+                                {expandedContactId === `audit-${idx}` ? "Close Log" : "View Log"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Collapsible raw request/response investigation log */}
+                {data.discoveryAudits.map((audit, idx) => {
+                  if (expandedContactId !== `audit-${idx}`) return null;
+                  const rejectionKeys = Object.keys(audit.rejectionReasons);
+                  return (
+                    <motion.div 
+                      key={`expanded-audit-${idx}`}
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 border border-[var(--brand-border)] bg-[var(--brand-surface)] rounded font-mono text-xs space-y-4 text-[var(--brand-muted)]"
+                    >
+                      <div className="flex items-center justify-between border-b border-[var(--brand-border)] pb-2">
+                        <span className="text-white font-bold uppercase tracking-wider text-[10px]">
+                          Audit Log for {audit.domain} ({audit.providerUsed})
+                        </span>
+                        <span className="text-[9px] bg-red-500/10 text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded">
+                          INVESTIGATION DETECTED
+                        </span>
+                      </div>
+                      
+                      {/* Rejections breakdown */}
+                      <div className="space-y-1">
+                        <span className="text-white block uppercase text-[9px] tracking-wider">Rejections Breakdown:</span>
+                        {rejectionKeys.length > 0 ? (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {rejectionKeys.map((key) => (
+                              <span key={key} className="bg-black/40 border border-[var(--brand-border)] text-rose-400 px-2 py-0.5 rounded text-[10px]">
+                                {key.replace(/_/g, " ")}: {audit.rejectionReasons[key]}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[var(--brand-success)] font-bold text-[10px]">0 contacts rejected. Excellent conversion!</span>
+                        )}
+                      </div>
+
+                      {/* Request Payload */}
+                      <div className="space-y-1">
+                        <span className="text-white block uppercase text-[9px] tracking-wider">Raw API Request (URL/Filters):</span>
+                        <pre className="bg-black border border-[var(--brand-border)] p-3 rounded text-[10px] text-white overflow-x-auto max-h-[120px]">
+                          {JSON.stringify(audit.requestJson, null, 2)}
+                        </pre>
+                      </div>
+
+                      {/* Response Payload */}
+                      <div className="space-y-1">
+                        <span className="text-white block uppercase text-[9px] tracking-wider">Raw API Response Payload:</span>
+                        <pre className="bg-black border border-[var(--brand-border)] p-3 rounded text-[10px] text-white overflow-x-auto max-h-[250px] scrollbar-hide">
+                          {typeof audit.responseJson === "string" 
+                            ? audit.responseJson 
+                            : JSON.stringify(audit.responseJson, null, 2)}
+                        </pre>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+
+              </div>
+            </div>
           )}
 
           {data.contacts.length > 0 && (

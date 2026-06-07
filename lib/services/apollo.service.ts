@@ -2,48 +2,60 @@ import { fetchWithTimeout } from "@/lib/utils/retry";
 import type { LookalikeCompany } from "./ocean.service";
 import { getCached, setCached } from "@/lib/redis/cache";
 
-export interface DecisionMaker {
-  firstName: string;
-  lastName: string;
-  fullName: string;
-  title: string;
-  linkedinUrl?: string;
-  companyDomain: string;
-  companyName: string;
-  email?: string;
-}
+import type { ProviderResult, DecisionMaker } from "./provider.interface";
 
 export async function findDecisionMakersApollo(
-  companies: LookalikeCompany[]
-): Promise<DecisionMaker[]> {
+  company: LookalikeCompany
+): Promise<ProviderResult> {
   const apiKey = process.env.APOLLO_API_KEY;
   if (!apiKey) {
-    console.warn("APOLLO_API_KEY is not set. Returning empty array.");
-    return [];
+    console.warn("APOLLO_API_KEY is not set. Returning empty result.");
+    return {
+      contacts: [],
+      metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
+      rawRequest: null,
+      rawResponse: null,
+      status: "api_error",
+      errorMessage: "APOLLO_API_KEY is not set",
+    };
   }
 
-  const results: DecisionMaker[] = [];
-  for (const company of companies) {
-    try {
-      const contacts = await searchCompanyContactsApollo(company, apiKey);
-      results.push(...contacts);
-    } catch (err) {
-      console.error(`[Apollo Fallback] Failed to search contacts for ${company.domain}:`, err);
-    }
+  try {
+    return await searchCompanyContactsApollo(company, apiKey);
+  } catch (err: any) {
+    console.error(`[Apollo Fallback] Failed to search contacts for ${company.domain}:`, err);
+    return {
+      contacts: [],
+      metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
+      rawRequest: { q_organization_domains: [company.domain] },
+      rawResponse: null,
+      status: "api_error",
+      errorMessage: err.message ?? "Unknown error",
+    };
   }
-
-  return results;
 }
 
 async function searchCompanyContactsApollo(
   company: LookalikeCompany,
   apiKey: string
-): Promise<DecisionMaker[]> {
+): Promise<ProviderResult> {
   const cacheKey = `apollo:contacts:${company.domain}`;
   const cached = await getCached<DecisionMaker[]>(cacheKey);
   if (cached) {
     console.log(`[Redis Cache] Hit for Apollo contacts of domain: ${company.domain}`);
-    return cached;
+    const emails = cached.filter((c: DecisionMaker) => c.email);
+    return {
+      contacts: cached,
+      metrics: {
+        rawReturned: cached.length,
+        parsed: cached.length,
+        emailsReturned: emails.length,
+        emailsParsed: emails.length,
+      },
+      rawRequest: { cache: "redis", domain: company.domain },
+      rawResponse: { cached: true },
+      status: cached.length > 0 ? "success" : "zero_results",
+    };
   }
 
   // Check Postgres DB cache for historical contacts of this domain
@@ -73,56 +85,101 @@ async function searchCompanyContactsApollo(
         email: c.verifiedEmails[0]?.email ?? undefined,
       }));
       await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
-      return contacts;
+      const emails = contacts.filter(c => c.email);
+      return {
+        contacts,
+        metrics: {
+          rawReturned: contacts.length,
+          parsed: contacts.length,
+          emailsReturned: emails.length,
+          emailsParsed: emails.length,
+        },
+        rawRequest: { cache: "postgres", domain: company.domain },
+        rawResponse: { cached: true },
+        status: contacts.length > 0 ? "success" : "zero_results",
+      };
     }
   } catch (dbErr) {
     console.warn(`[Postgres DB Cache] Failed to check database for existing contacts in Apollo:`, dbErr);
   }
 
   console.log(`[Apollo Fallback] Fetching contacts for ${company.domain}...`);
-  const response = await fetchWithTimeout("https://api.apollo.io/api/v1/contacts/search", {
+  const rawRequestPayload = {
+    q_organization_domains: [company.domain],
+    person_titles: [
+      "CEO", "CTO", "CMO", "COO", "CFO",
+      "VP Sales", "VP Marketing", "Head of Sales",
+      "Director of Sales", "Founder", "Co-Founder",
+      "VP of Sales", "Head of Growth", "Director of Marketing"
+    ],
+    page: 1,
+    per_page: 20
+  };
+
+  const response = await fetchWithTimeout("https://api.apollo.io/api/v1/mixed_people/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Api-Key": apiKey,
     },
-    body: JSON.stringify({
-      q_organization_domains: company.domain,
-      person_titles: [
-        "CEO", "CTO", "CMO", "COO", "CFO",
-        "VP Sales", "VP Marketing", "Head of Sales",
-        "Director of Sales", "Founder", "Co-Founder",
-        "VP of Sales", "Head of Growth", "Director of Marketing"
-      ],
-      page: 1,
-      per_page: 20
-    }),
+    body: JSON.stringify(rawRequestPayload),
     timeoutMs: 20000,
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Apollo API error ${response.status} for ${company.domain}: ${text}`);
+    let status: "forbidden" | "rate_limited" | "api_error" = "api_error";
+    if (response.status === 403 || text.includes("API_INACCESSIBLE") || text.includes("forbidden")) {
+      status = "forbidden";
+    } else if (response.status === 429) {
+      status = "rate_limited";
+    }
+    return {
+      contacts: [],
+      metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
+      rawRequest: rawRequestPayload,
+      rawResponse: text,
+      status,
+      errorMessage: `Apollo API error ${response.status} for ${company.domain}: ${text}`,
+    };
   }
 
   const data = await response.json();
-  const rawContacts = data.contacts ?? [];
+  const rawPeople = data.people ?? data.contacts ?? [];
+  let totalEmailsReturned = 0;
 
-  const contacts = rawContacts.map((item: any) => {
-    const firstName = (item.first_name ?? "") as string;
-    const lastName = (item.last_name ?? "") as string;
+  const contacts = rawPeople.map((item: any) => {
+    const firstName = (item.first_name ?? item.firstName ?? "") as string;
+    const lastName = (item.last_name ?? item.lastName ?? "") as string;
+    const email = (item.email ?? item.primary_email ?? item.email_address ?? undefined) as string | undefined;
+
+    if (email) totalEmailsReturned++;
+
     return {
       firstName,
       lastName,
       fullName: item.name ?? `${firstName} ${lastName}`.trim() ?? "",
-      title: (item.title ?? "Decision Maker") as string,
-      linkedinUrl: (item.linkedin_url ?? undefined) as string | undefined,
+      title: (item.title ?? item.job_title ?? "Decision Maker") as string,
+      linkedinUrl: (item.linkedin_url ?? item.linkedinUrl ?? undefined) as string | undefined,
       companyDomain: company.domain,
       companyName: company.name,
-      email: (item.email ?? undefined) as string | undefined,
+      email,
     };
   });
 
   await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
-  return contacts;
+  const emailsParsed = contacts.filter((c: DecisionMaker) => c.email).length;
+
+  return {
+    contacts,
+    metrics: {
+      rawReturned: rawPeople.length,
+      parsed: contacts.length,
+      emailsReturned: totalEmailsReturned,
+      emailsParsed,
+    },
+    rawRequest: rawRequestPayload,
+    rawResponse: data,
+    status: contacts.length > 0 ? "success" : "zero_results",
+  };
 }

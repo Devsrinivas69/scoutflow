@@ -1,4 +1,4 @@
-import { DecisionMaker } from "./prospeo.service";
+import { DecisionMaker } from "./provider.interface";
 
 export interface AuditedContact {
   firstName: string;
@@ -13,12 +13,13 @@ export interface AuditedContact {
   reason: string;
   duplicateStatus: "ORIGINAL" | "DUPLICATE";
   email?: string;
+  rejectionReasonCategory?: "company_mismatch" | "title_keywords" | "missing_linkedin" | "incomplete_name" | "duplicate" | "low_score";
 }
 
 const rejectKeywords = [
   "intern", "student", "trainee", "former", "retired", "freelance", 
-  "advisor", "consultant", "contractor", "assistant", "volunteer", 
-  "ex-employee", "ex-", "previous", "retired"
+  "advisor", "consultant", "contractor", "assistant to", "executive assistant", "volunteer", 
+  "ex-employee", "ex-", "previous"
 ];
 
 const priorityKeywords = [
@@ -28,7 +29,24 @@ const priorityKeywords = [
 ];
 
 /**
- * Audit, validate, and score Prospeo contact results
+ * Extract root domain part to compare domains more robustly (e.g. sutherlandglobal.com vs sutherland.com)
+ */
+function extractDomainRoot(domain: string): string {
+  const clean = domain.toLowerCase().replace(/^www\./, "").trim();
+  const parts = clean.split(".");
+  if (parts.length >= 2) {
+    const lastTwo = parts.slice(-2).join(".");
+    const commonDoubleExtensions = ["co.uk", "org.uk", "com.br", "net.in", "co.in", "org.in", "gov.in", "ac.in"];
+    if (commonDoubleExtensions.includes(lastTwo) && parts.length >= 3) {
+      return parts[parts.length - 3];
+    }
+    return parts[parts.length - 2];
+  }
+  return parts[0] || "";
+}
+
+/**
+ * Score contact priority based on job titles
  */
 function getContactPriorityScore(title: string): number {
   const t = title.toLowerCase();
@@ -68,20 +86,35 @@ export function auditAndScoreContacts(
     let score = 100;
     let status: "SELECTED" | "REJECTED" = "SELECTED";
     let duplicateStatus: "ORIGINAL" | "DUPLICATE" = "ORIGINAL";
+    let rejectionReasonCategory: AuditedContact["rejectionReasonCategory"] = undefined;
     const auditNotes: string[] = [];
     const rejectNotes: string[] = [];
 
-    // 1. Company Match Validation
+    // 1. Company Match Validation (Relaxed to allow root domain intersections)
     const companyName = (contact.companyName ?? "").toLowerCase().trim();
     const companyDomain = (contact.companyDomain ?? "").toLowerCase().trim();
     
-    const isDomainMatch = companyDomain.includes(baseDomainName) || cleanDomain.includes(companyDomain);
-    const isNameMatch = companyName.includes(baseDomainName) || baseDomainName.includes(companyName);
+    const cleanDomainRoot = extractDomainRoot(cleanDomain);
+    const companyDomainRoot = extractDomainRoot(companyDomain);
+    
+    const isDomainMatch = 
+      companyDomainRoot === cleanDomainRoot || 
+      companyDomainRoot.includes(cleanDomainRoot) || 
+      cleanDomainRoot.includes(companyDomainRoot) ||
+      companyDomain.includes(baseDomainName) || 
+      cleanDomain.includes(companyDomain);
+
+    const isNameMatch = 
+      companyName.includes(baseDomainName) || 
+      baseDomainName.includes(companyName) ||
+      companyName.includes(cleanDomainRoot) ||
+      cleanDomainRoot.includes(companyName);
 
     if (!isDomainMatch && !isNameMatch) {
       score = Math.max(0, score - 50);
       status = "REJECTED";
-      rejectNotes.push(`Company mismatch ('${contact.companyName}' does not align with target '${cleanDomain}')`);
+      rejectionReasonCategory = "company_mismatch";
+      rejectNotes.push(`Company mismatch ('${contact.companyName}' / '${companyDomain}' does not align with target '${cleanDomain}')`);
     } else {
       auditNotes.push("Company match verified");
     }
@@ -91,11 +124,12 @@ export function auditAndScoreContacts(
     
     // Check reject keywords (Intern, former employee, etc)
     const matchedReject = rejectKeywords.find((kw) => title.includes(kw));
-    if (matchedReject) {
+    if (matchedReject && status !== "REJECTED") {
       score = Math.max(0, score - 40);
       status = "REJECTED";
+      rejectionReasonCategory = "title_keywords";
       rejectNotes.push(`Low-priority title keyword matched ('${matchedReject}')`);
-    } else {
+    } else if (!matchedReject) {
       // Check priority keywords (Founders, C-levels, heads)
       const isPriority = priorityKeywords.some((kw) => title.includes(kw));
       if (isPriority) {
@@ -117,7 +151,7 @@ export function auditAndScoreContacts(
     }
 
     // 4. Data Completeness
-    if (!contact.firstName || !contact.lastName) {
+    if ((!contact.firstName || !contact.lastName) && status !== "REJECTED") {
       score = Math.max(0, score - 15);
       rejectNotes.push("Incomplete contact name data");
     }
@@ -132,10 +166,11 @@ export function auditAndScoreContacts(
     const isDuplicateLinkedin = cleanLinkedinUrl && seenLinkedInUrls.has(cleanLinkedinUrl);
     const isDuplicateNameCompany = seenNameCompany.has(nameCompanyKey);
 
-    if (isDuplicateEmail || isDuplicateLinkedin || isDuplicateNameCompany) {
+    if ((isDuplicateEmail || isDuplicateLinkedin || isDuplicateNameCompany) && status !== "REJECTED") {
       score = Math.max(0, score - 80);
       status = "REJECTED";
       duplicateStatus = "DUPLICATE";
+      rejectionReasonCategory = "duplicate";
       rejectNotes.push("Duplicate contact profile detected");
     } else {
       if (email) seenEmails.add(email);
@@ -148,6 +183,7 @@ export function auditAndScoreContacts(
     // 6. Final Status check
     if (score < 60 && status !== "REJECTED") {
       status = "REJECTED";
+      rejectionReasonCategory = "low_score";
       rejectNotes.push(`Quality score below acceptance threshold (${score}/100)`);
     }
 
@@ -172,6 +208,7 @@ export function auditAndScoreContacts(
       reason: reasonText,
       duplicateStatus,
       email: contact.email,
+      rejectionReasonCategory,
     };
   });
 }
