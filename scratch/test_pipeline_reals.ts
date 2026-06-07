@@ -1,5 +1,6 @@
 import "dotenv/config";
 process.env.TEST_MODE = "true";
+process.env.DATABASE_URL = "postgresql://postgres:vbsSszePRekhgDxluFdClyfFlqBBVXDG@acela.proxy.rlwy.net:44456/railway";
 
 const domains = ["stripe.com", "notion.so", "hubspot.com"];
 const userId = "cmq21al3900011pp9jezoniy7"; // srinivas

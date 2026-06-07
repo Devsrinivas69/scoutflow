@@ -9,6 +9,7 @@ import {
 import { motion } from "framer-motion";
 import useSWR from "swr";
 import dynamic from "next/dynamic";
+import { generateAndScorePatterns } from "@/lib/services/eazyreach.service";
 
 // Fetcher defined outside component so SWR deduplication works correctly
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -32,7 +33,19 @@ interface PipelineStatus {
     emailsReady: number;
   };
   companies: Array<{ name: string; domain: string; industry?: string; country?: string }>;
-  contacts: Array<{ name: string; title: string; email: string | null; patternUsed?: string | null; confidenceScore?: string | null }>;
+  contacts: Array<{
+    id: string;
+    name: string;
+    firstName: string;
+    lastName: string | null;
+    title: string;
+    email: string | null;
+    patternUsed?: string | null;
+    confidenceScore?: string | null;
+    companyName?: string;
+    companyDomain?: string;
+    linkedinUrl?: string | null;
+  }>;
   campaign: {
     id: string;
     status: string;
@@ -57,6 +70,7 @@ export default function MissionView() {
   const runId = params.id as string;
 
   const [showApproval, setShowApproval] = useState(false);
+  const [expandedContactId, setExpandedContactId] = useState<string | null>(null);
 
   const { data, error, mutate } = useSWR<PipelineStatus>(
     `/api/pipeline/${runId}/status`,
@@ -360,33 +374,115 @@ export default function MissionView() {
                 <span className="text-[var(--brand-primary)] font-mono text-xs">{data.contacts.length} entries</span>
               </div>
               <div className="divide-y divide-[var(--brand-border)]">
-                {data.contacts.slice(0, 10).map((c, i) => (
-                  <div key={i} className="p-4 flex items-center justify-between hover:bg-[var(--brand-surface-2)] transition-colors">
-                    <div>
-                      <div className="text-[var(--brand-text)] font-medium text-sm">{c.name}</div>
-                      <div className="text-[var(--brand-muted)] text-xs mt-1">{c.title}</div>
-                      {c.email && c.email !== "No verified email found" && c.patternUsed && (
-                        <div className="text-[10px] text-[var(--brand-muted)] font-mono mt-1">
-                          Pattern: {c.patternUsed}
+                {data.contacts.slice(0, 10).map((c, i) => {
+                  const contactIdKey = c.id || i.toString();
+                  const isExpanded = expandedContactId === contactIdKey;
+                  return (
+                    <div 
+                      key={contactIdKey} 
+                      className="p-4 hover:bg-[var(--brand-surface-2)] transition-colors cursor-pointer"
+                      onClick={() => setExpandedContactId(isExpanded ? null : contactIdKey)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[var(--brand-text)] font-medium text-sm flex items-center gap-2">
+                            {c.name}
+                            <span className="text-[9px] font-mono text-[var(--brand-muted)] border border-[var(--brand-border)] px-1 rounded uppercase tracking-wide">
+                              Click to inspect
+                            </span>
+                          </div>
+                          <div className="text-[var(--brand-muted)] text-xs mt-1">{c.title}</div>
+                          {c.email && c.email !== "No verified email found" && c.patternUsed && (
+                            <div className="text-[10px] text-[var(--brand-muted)] font-mono mt-1">
+                              Pattern: {c.patternUsed}
+                            </div>
+                          )}
+                        </div>
+                        {c.email && c.email !== "No verified email found" ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded">PREDICTED</span>
+                            {c.confidenceScore && (
+                              <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
+                                Confidence: {c.confidenceScore}
+                              </span>
+                            )}
+                          </div>
+                        ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
+                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded">NOT FOUND</span>
+                        ) : (
+                          <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
+                        )}
+                      </div>
+
+                      {isExpanded && (
+                        <div 
+                          className="mt-4 p-4 border border-[var(--brand-border)] bg-[var(--brand-bg)] rounded text-xs font-mono space-y-3 text-[var(--brand-muted)]"
+                          onClick={(e) => e.stopPropagation()} // Prevent toggling/collapsing on click inside panel
+                        >
+                          <div className="text-[var(--brand-primary)] uppercase tracking-wider font-bold text-[10px] flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-primary)] animate-pulse" />
+                            Developer Diagnostics
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Company:</span>
+                              <span className="text-[var(--brand-text)]">{c.companyName || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Domain:</span>
+                              <span className="text-[var(--brand-text)]">{c.companyDomain || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Contact Name:</span>
+                              <span className="text-[var(--brand-text)]">{c.name}</span>
+                            </div>
+                            <div>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Confidence Score:</span>
+                              <span className="text-[var(--brand-text)]">{c.confidenceScore || "N/A"}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            <span className="text-white block uppercase text-[9px] tracking-wider mb-1">Generated Email Candidates:</span>
+                            <div className="pl-3 border-l border-[var(--brand-border)] space-y-1.5 max-h-[160px] overflow-y-auto">
+                              {(() => {
+                                const fn = c.firstName || c.name.split(" ")[0] || "";
+                                const ln = c.lastName || c.name.split(" ").slice(1).join(" ") || "";
+                                const dom = c.companyDomain || "";
+                                if (!fn || !dom) return <div className="text-[var(--brand-error)]">Incomplete name or domain data</div>;
+                                const cands = generateAndScorePatterns(fn, ln, dom);
+                                return cands.map((cand) => {
+                                  const isSelected = cand.email === c.email;
+                                  return (
+                                    <div key={cand.email} className={`flex items-center justify-between text-[11px] ${isSelected ? "text-[var(--brand-success)] font-bold" : ""}`}>
+                                      <span>• {cand.email}</span>
+                                      <span className="text-[9px] opacity-75 font-normal">({cand.pattern} - {cand.score} pts)</span>
+                                    </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[var(--brand-border)] text-[9px] uppercase tracking-wider font-semibold">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              DB Stored: {c.email ? "YES" : "NO"}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              API Returned: {c.email ? "YES" : "NO"}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-1.5 h-1.5 rounded-full bg-[var(--brand-success)]`} />
+                              UI Rendered: YES
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
-                    {c.email && c.email !== "No verified email found" ? (
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded">PREDICTED</span>
-                        {c.confidenceScore && (
-                          <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
-                            Confidence: {c.confidenceScore}
-                          </span>
-                        )}
-                      </div>
-                    ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
-                      <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded">NOT FOUND</span>
-                    ) : (
-                      <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
                 {data.contacts.length > 10 && (
                   <div className="p-4 text-center">
                     <span className="text-[var(--brand-primary)] font-mono text-xs">

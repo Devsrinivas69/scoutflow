@@ -21,7 +21,10 @@ export async function GET(
         contacts: {
           orderBy: { createdAt: "asc" },
           take: 50,
-          include: { verifiedEmails: true },
+          include: { 
+            verifiedEmails: true,
+            company: true,
+          },
         },
         campaigns: {
           orderBy: { createdAt: "desc" },
@@ -84,11 +87,17 @@ export async function GET(
       contacts: run.contacts.slice(0, 10).map((c) => {
         const ve = c.verifiedEmails[0] ?? null;
         return {
+          id: c.id,
           name: c.fullName,
+          firstName: c.firstName,
+          lastName: c.lastName,
           title: c.title,
           email: ve?.email ?? null,
           patternUsed: ve?.patternUsed ?? null,
           confidenceScore: ve?.confidenceScore ?? null,
+          companyName: c.company.name,
+          companyDomain: c.company.domain,
+          linkedinUrl: c.linkedinUrl,
         };
       }),
       campaign: campaign

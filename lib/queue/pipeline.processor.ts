@@ -265,7 +265,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     console.log(`[Stage 4] Generating email drafts...`);
 
     const emailDrafts = verifiedEmails
-      .filter((ve) => ve.status === "VALID" || ve.status === "CATCH_ALL")
+      .filter((ve) => ve.status === "VALID" || ve.status === "CATCH_ALL" || ve.status === "UNKNOWN")
       .map((ve) => ({
         email: ve.email,
         name: ve.contactFullName,

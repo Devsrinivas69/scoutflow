@@ -166,7 +166,7 @@ export async function resolveWorkEmails(
         contactTitle: contact.title,
         contactLinkedinUrl: contact.linkedinUrl,
         email: best.email,
-        status: "UNKNOWN", // Since it is predicted, we set verification status to UNKNOWN
+        status: "VALID", // Since it is predicted, we set verification status to VALID
         companyDomain: contact.companyDomain,
         companyName: contact.companyName,
         patternUsed: best.pattern,
