@@ -80,17 +80,23 @@ export async function POST(
       data: { status: "APPROVED" },
     });
 
+    const actingUserId = session.user.id;
+    // [Brevo Trace Step 1/8] Campaign approved by user, starting async outreach pipeline.
+    console.log(`[Brevo Trace Step 1/8] Campaign approved for run ${runId} by user ${actingUserId}. Status changed to APPROVED.`);
+
     // Respond immediately — don't block the HTTP request on email delivery
     // The actual sending happens asynchronously after response is sent
-    const actingUserId = session.user.id; // capture before async boundary
     void (async () => {
       try {
-        console.log(`[Milestone] Brevo Send Started for campaign ${campaign.id} at ${new Date().toISOString()}`);
+        console.log(`[Brevo Trace] Campaign ${campaign.id} background worker started.`);
         const brevoStart = Date.now();
+        
+        // sendOutreachEmails handles Step 2 (Recipient Selection), Step 3 (Email Gen), Step 4 (Payload Build), Step 5 (API Request) & Step 6 (API Response).
         const results = await sendOutreachEmails(emailDrafts);
         const brevoDuration = ((Date.now() - brevoStart) / 1000).toFixed(2);
-        console.log(`[Milestone] Brevo Send Completed for campaign ${campaign.id} in ${brevoDuration}s`);
+        console.log(`[Brevo Trace] Brevo batch completed for campaign ${campaign.id} in ${brevoDuration}s`);
 
+        console.log(`[Brevo Trace Step 7/8] Database Logging: saving logs to EmailLog model for campaign ${campaign.id}`);
         // Save email logs
         const contacts = await prisma.contact.findMany({
           where: { runId },
@@ -103,7 +109,10 @@ export async function POST(
               c.verifiedEmails.some((ve) => ve.email === result.email)
             );
             const draft = emailDrafts.find((d) => d.email === result.email);
-            if (!contact || !draft) return;
+            if (!contact || !draft) {
+              console.warn(`[Brevo Trace] Could not associate result for email ${result.email} with contact/draft.`);
+              return;
+            }
 
             await prisma.emailLog.create({
               data: {
@@ -113,7 +122,7 @@ export async function POST(
                 subject: draft.subject,
                 body: draft.body,
                 status: result.success ? "SENT" : "FAILED",
-                brevoMsgId: result.messageId,
+                brevoMsgId: result.messageId || null,
                 errorMessage: result.error ?? null,
                 requestJson: result.requestJson ?? null,
                 responseJson: result.responseJson ?? null,
@@ -159,17 +168,18 @@ export async function POST(
           data: { status: finalStatus },
         });
 
+        // [Brevo Trace Step 8/8] UI Status is updated and audit logged.
+        console.log(`[Brevo Trace Step 8/8] UI Status: run ${runId} final status is ${finalStatus}. Approved, sent: ${sentCount}, failed: ${failedCount}.`);
+
         await prisma.auditLog.create({
           data: {
             orgId: run.orgId,
             userId: actingUserId,
             action: "campaign.sent",
             resource: campaign.id,
-            metadata: { sentCount, failedCount, runId, finalStatus },
+            metadata: { sentCount, failedCount, runId, finalStatus, campaignErrorMessage },
           },
         });
-
-        console.log(`[Approve] Campaign ${campaign.id} finished. Sent: ${sentCount}, Failed: ${failedCount}, Final Run Status: ${finalStatus}`);
       } catch (err: any) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);

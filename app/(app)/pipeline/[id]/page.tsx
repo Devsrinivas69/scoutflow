@@ -97,6 +97,104 @@ interface PipelineStatus {
   }>;
 }
 
+function diagnoseBrevoError(errorMessage?: string | null): {
+  title: string;
+  description: string;
+  badge: string;
+  badgeColor: string;
+  showVerifyLink: boolean;
+} {
+  if (!errorMessage) {
+    return {
+      title: "Unknown Delivery Failure",
+      description: "An unknown error occurred while sending emails via Brevo.",
+      badge: "Unknown Error",
+      badgeColor: "error",
+      showVerifyLink: false,
+    };
+  }
+
+  const errLower = errorMessage.toLowerCase();
+
+  if (errLower.includes("unauthorized_sender") || errLower.includes("sender") || errLower.includes("not verified") || errLower.includes("unverified")) {
+    return {
+      title: "Sender Rejected",
+      description: "Brevo rejected the sender email. This happens when your BREVO_SENDER_EMAIL has not been added and verified in app.brevo.com under 'Senders & IPs'.",
+      badge: "Sender Rejected",
+      badgeColor: "error",
+      showVerifyLink: true,
+    };
+  }
+
+  if (errLower.includes("unauthorized") || errLower.includes("api-key") || errLower.includes("api key") || errLower.includes("forbidden") || errLower.includes("api_key")) {
+    return {
+      title: "Authentication Error",
+      description: "The configured BREVO_API_KEY is invalid or unauthorized. Please verify the API key under Brevo -> Settings -> SMTP & API Keys.",
+      badge: "Authentication Error",
+      badgeColor: "error",
+      showVerifyLink: false,
+    };
+  }
+
+  if (errLower.includes("quota_exceeded") || errLower.includes("quota") || errLower.includes("limit") || errLower.includes("exceeded")) {
+    return {
+      title: "Quota Exceeded",
+      description: "Brevo's daily sending limit has been exceeded. The Brevo Free plan allows a maximum of 300 emails per day.",
+      badge: "Quota Exceeded",
+      badgeColor: "warning",
+      showVerifyLink: false,
+    };
+  }
+
+  if (errLower.includes("rate_limit") || errLower.includes("rate limit") || errLower.includes("too many requests") || errLower.includes("429")) {
+    return {
+      title: "Rate Limit Exceeded",
+      description: "Brevo API rate limit exceeded. The server is making requests too quickly.",
+      badge: "Rate Limit Exceeded",
+      badgeColor: "warning",
+      showVerifyLink: false,
+    };
+  }
+
+  if (errLower.includes("recipient") || (errLower.includes("invalid_parameter") && errLower.includes("to"))) {
+    return {
+      title: "Invalid Recipient",
+      description: "Brevo rejected the recipient email address. The recipient list may contain malformed or invalid email domains.",
+      badge: "Invalid Recipient",
+      badgeColor: "warning",
+      showVerifyLink: false,
+    };
+  }
+
+  if (errLower.includes("template")) {
+    return {
+      title: "Template Error",
+      description: "Brevo returned a template error. Ensure HTML and text templates are valid and don't contain unescaped dynamic parameters.",
+      badge: "Template Error",
+      badgeColor: "error",
+      showVerifyLink: false,
+    };
+  }
+
+  if (errLower.includes("invalid_parameter") || errLower.includes("payload") || errLower.includes("parameter")) {
+    return {
+      title: "Invalid Payload",
+      description: "The constructed payload does not meet Brevo's API requirements. Check API logs for details.",
+      badge: "Invalid Payload",
+      badgeColor: "error",
+      showVerifyLink: false,
+    };
+  }
+
+  return {
+    title: "Brevo API Error",
+    description: errorMessage,
+    badge: "API Failure",
+    badgeColor: "error",
+    showVerifyLink: false,
+  };
+}
+
 const STAGES = [
   { num: 0, icon: Globe, label: "Domain", desc: "Target Acquired" },
   { num: 1, icon: Search, label: "Discovery", desc: "Ocean.io" },
@@ -353,57 +451,73 @@ export default function MissionView() {
           )}
 
           {/* ── Delivery Failed — Beautiful Premium Alert ───────────── */}
-          {data.campaign && (data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)) && (
-            <motion.div
-              initial={{ opacity: 0, y: 8, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              className="rounded-xl border border-[var(--brand-error)]/40 bg-gradient-to-br from-[rgba(239,68,68,0.08)] to-[rgba(239,68,68,0.03)] overflow-hidden"
-            >
-              {/* Header */}
-              <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--brand-error)]/20 bg-[rgba(239,68,68,0.06)]">
-                <div className="w-8 h-8 rounded-lg bg-[rgba(239,68,68,0.15)] border border-[var(--brand-error)]/30 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-4 h-4 text-[var(--brand-error)]" />
-                </div>
-                <div>
-                  <p className="text-[var(--brand-error)] font-bold text-sm uppercase tracking-widest">Delivery Failed</p>
-                  <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">All emails were rejected by the outreach provider.</p>
-                </div>
-              </div>
-
-              <div className="p-5 space-y-4">
-                {/* Most Likely Cause */}
-                <div className="rounded-lg border border-[var(--brand-warning)]/30 bg-[rgba(255,181,71,0.06)] p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Zap className="w-3.5 h-3.5 text-[var(--brand-warning)] shrink-0" />
-                    <span className="text-[var(--brand-warning)] font-mono text-[10px] uppercase tracking-widest font-bold">Most Likely Cause: Sender Not Verified</span>
+          {data.campaign && (data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)) && (() => {
+            const diagnosis = diagnoseBrevoError(data.campaign.errorMessage);
+            const badgeColorClasses = 
+              diagnosis.badgeColor === "error" 
+                ? "bg-[rgba(239,68,68,0.1)] border-[var(--brand-error)]/25 text-[var(--brand-error)]" 
+                : "bg-[rgba(255,181,71,0.1)] border-[var(--brand-warning)]/25 text-[var(--brand-warning)]";
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                className="rounded-xl border border-[var(--brand-error)]/40 bg-gradient-to-br from-[rgba(239,68,68,0.08)] to-[rgba(239,68,68,0.03)] overflow-hidden"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--brand-error)]/20 bg-[rgba(239,68,68,0.06)]">
+                  <div className="w-8 h-8 rounded-lg bg-[rgba(239,68,68,0.15)] border border-[var(--brand-error)]/30 flex items-center justify-center shrink-0">
+                    <AlertCircle className="w-4 h-4 text-[var(--brand-error)]" />
                   </div>
-                  <p className="text-[var(--brand-text)] text-xs leading-relaxed mb-3">
-                    Brevo silently rejects sends from unverified senders. Your sender{" "}
-                    <code className="bg-black/40 px-1.5 py-0.5 rounded border border-white/10 text-[var(--brand-warning)] font-mono">
-                      {process.env.NEXT_PUBLIC_BREVO_SENDER_EMAIL ?? "contact@scout-flow.app"}
-                    </code>
-                    {" "}must be verified before emails can be sent.
-                  </p>
-                  <a
-                    href="https://app.brevo.com/senders/list"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--brand-warning)] text-black text-[11px] font-bold uppercase tracking-wide hover:opacity-90 transition-opacity"
-                  >
-                    Verify Sender on Brevo <ExternalLink className="w-3 h-3" />
-                  </a>
+                  <div>
+                    <p className="text-[var(--brand-error)] font-bold text-sm uppercase tracking-widest">Delivery Failed</p>
+                    <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">Emails were rejected by the outreach provider.</p>
+                  </div>
                 </div>
 
-                {/* Error detail if available */}
-                {data.campaign.errorMessage && (
-                  <div className="rounded-lg border border-white/5 bg-black/30 p-3">
-                    <p className="text-[var(--brand-muted)] text-[10px] uppercase tracking-widest font-mono mb-1.5">Provider Response</p>
-                    <p className="text-[var(--brand-error)]/80 font-mono text-[11px] leading-relaxed break-all">
-                      {data.campaign.errorMessage}
+                <div className="p-5 space-y-4">
+                  {/* Diagnosis */}
+                  <div className="rounded-lg border border-white/5 bg-black/25 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Zap className="w-3.5 h-3.5 text-[var(--brand-warning)] shrink-0" />
+                      <span className="text-[var(--brand-warning)] font-mono text-[10px] uppercase tracking-widest font-bold">Diagnosed Issue:</span>
+                      <span className={`inline-flex px-2 py-0.5 rounded border font-mono text-[9px] uppercase font-bold ${badgeColorClasses}`}>
+                        {diagnosis.badge}
+                      </span>
+                    </div>
+                    <p className="text-white font-bold text-sm leading-snug mb-1">{diagnosis.title}</p>
+                    <p className="text-[var(--brand-muted)] text-xs leading-relaxed mb-3">
+                      {diagnosis.description}
                     </p>
+                    {diagnosis.showVerifyLink && (
+                      <div className="pt-1.5 space-y-3">
+                        <div className="text-[var(--brand-muted)] text-[11px] leading-relaxed">
+                          Your sender address:{" "}
+                          <code className="bg-black/40 px-1.5 py-0.5 rounded border border-white/10 text-[var(--brand-warning)] font-mono">
+                            {process.env.NEXT_PUBLIC_BREVO_SENDER_EMAIL ?? "contact@scout-flow.app"}
+                          </code>
+                        </div>
+                        <a
+                          href="https://app.brevo.com/senders/list"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--brand-warning)] text-black text-[11px] font-bold uppercase tracking-wide hover:opacity-90 transition-opacity"
+                        >
+                          Verify Sender on Brevo <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* Error detail if available */}
+                  {data.campaign.errorMessage && (
+                    <div className="rounded-lg border border-white/5 bg-black/30 p-3">
+                      <p className="text-[var(--brand-muted)] text-[10px] uppercase tracking-widest font-mono mb-1.5">Raw API Error Message</p>
+                      <p className="text-[var(--brand-error)]/80 font-mono text-[11px] leading-relaxed break-all">
+                        {data.campaign.errorMessage}
+                      </p>
+                    </div>
+                  )}
 
                 {/* Checklist */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
@@ -423,7 +537,7 @@ export default function MissionView() {
                 </div>
               </div>
             </motion.div>
-          )}
+          )})()}
 
           {/* ── Pipeline Hard Failure ──────────────────────────────── */}
           {isFailed && data.errorMessage && (

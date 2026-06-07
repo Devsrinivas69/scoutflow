@@ -10,6 +10,7 @@ const envSchema = z.object({
   BREVO_API_KEY: z.string().min(1, "BREVO_API_KEY is required"),
   BREVO_SENDER_EMAIL: z.string().email("BREVO_SENDER_EMAIL must be a valid email"),
   BREVO_SENDER_NAME: z.string().min(1, "BREVO_SENDER_NAME is required"),
+  BREVO_REPLY_TO_EMAIL: z.string().email("BREVO_REPLY_TO_EMAIL must be a valid email").optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 
