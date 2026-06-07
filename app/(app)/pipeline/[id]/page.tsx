@@ -61,6 +61,7 @@ interface PipelineStatus {
     emailsJson: Array<{ email: string; name: string; subject: string; body: string }>;
     sentCount?: number;
     failedCount?: number;
+    errorMessage?: string | null;
   } | null;
 }
 
@@ -344,9 +345,21 @@ export default function MissionView() {
                     Sending outreach emails in background. Progress: {data.campaign.sentCount ?? 0} sent, {data.campaign.failedCount ?? 0} failed (out of {data.campaign.emailsJson.length} total).
                   </p>
                 ) : data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
-                  <p className="text-[var(--brand-error)]">
-                    All deliveries failed. Please check your Brevo API key configuration and verified sender details in environment variables.
-                  </p>
+                  <div className="text-[var(--brand-error)] space-y-2">
+                    <p className="font-semibold">All deliveries failed.</p>
+                    {data.campaign.errorMessage ? (
+                      <div className="bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 p-3 rounded text-xs font-mono break-all whitespace-pre-wrap">
+                        Error: {data.campaign.errorMessage}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[var(--brand-muted)]">
+                        No error details available. Please check the server logs.
+                      </p>
+                    )}
+                    <p className="text-xs text-[var(--brand-muted)]">
+                      Please check your Brevo API key configuration, verified sender details, domain authentication, or daily quota limits.
+                    </p>
+                  </div>
                 ) : (
                   <>
                     <p className="text-[var(--brand-text)]">

@@ -193,6 +193,7 @@ model Campaign {
   subjectTemplate String
   bodyTemplate    String
   emailsJson      Json?
+  errorMessage    String?
   approvedAt      DateTime?
   sentAt          DateTime?
   emailLogs       EmailLog[]
@@ -215,6 +216,9 @@ model EmailLog {
   body       String      @db.Text
   status     EmailStatus @default(PENDING)
   brevoMsgId String?
+  errorMessage String?
+  requestJson  Json?
+  responseJson Json?
   sentAt     DateTime?
   openedAt   DateTime?
   repliedAt  DateTime?

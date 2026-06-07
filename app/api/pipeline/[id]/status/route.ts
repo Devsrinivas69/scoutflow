@@ -130,6 +130,7 @@ export async function GET(
             emailsJson: campaign.emailsJson,
             sentCount,
             failedCount,
+            errorMessage: campaign.errorMessage,
           }
         : null,
     });

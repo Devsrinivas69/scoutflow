@@ -12,6 +12,9 @@ export interface BrevoSendResult {
   messageId?: string;
   success: boolean;
   error?: string;
+  statusCode?: number;
+  requestJson?: any;
+  responseJson?: any;
 }
 
 export async function sendOutreachEmails(
@@ -28,20 +31,11 @@ export async function sendOutreachEmails(
   const results: BrevoSendResult[] = [];
 
   for (const recipient of recipients) {
-    try {
-      const result = await sendSingleEmail(recipient, { apiKey, senderEmail, senderName });
-      results.push(result);
+    const result = await sendSingleEmail(recipient, { apiKey, senderEmail, senderName });
+    results.push(result);
 
-      // Respect rate limits: small delay between sends
-      await new Promise((r) => setTimeout(r, 200));
-    } catch (err) {
-      console.error(`[Brevo] Failed to send to ${recipient.email}:`, err);
-      results.push({
-        email: recipient.email,
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    // Respect rate limits: small delay between sends
+    await new Promise((r) => setTimeout(r, 200));
   }
 
   return results;
@@ -51,49 +45,84 @@ async function sendSingleEmail(
   recipient: EmailRecipient,
   config: { apiKey: string; senderEmail: string; senderName: string }
 ): Promise<BrevoSendResult> {
-  const response = await fetchWithTimeout("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": config.apiKey,
+  const payload = {
+    sender: {
+      name: config.senderName,
+      email: config.senderEmail,
     },
-    body: JSON.stringify({
-      sender: {
-        name: config.senderName,
-        email: config.senderEmail,
-      },
-      to: [{ email: recipient.email, name: recipient.name }],
-      subject: recipient.subject,
-      textContent: recipient.body,
-      htmlContent: bodyToHtml(recipient.body),
-    }),
-    timeoutMs: 15000,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Brevo API error ${response.status}: ${text}`);
-  }
-
-  const data = await response.json();
-  
-  if (!data.messageId) {
-    throw new Error("Brevo response did not return a valid messageId");
-  }
-
-  console.log(`[Brevo API Send Success Log]
-    Recipient: ${recipient.email}
-    Subject: ${recipient.subject}
-    Sender: ${config.senderName} <${config.senderEmail}>
-    Message ID: ${data.messageId}
-    Timestamp: ${new Date().toISOString()}
-    Brevo Response: ${JSON.stringify(data)}`);
-
-  return {
-    email: recipient.email,
-    messageId: data.messageId,
-    success: true,
+    to: [{ email: recipient.email, name: recipient.name }],
+    subject: recipient.subject,
+    textContent: recipient.body,
+    htmlContent: bodyToHtml(recipient.body),
   };
+
+  try {
+    const response = await fetchWithTimeout("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": config.apiKey,
+      },
+      body: JSON.stringify(payload),
+      timeoutMs: 15000,
+    });
+
+    const statusCode = response.status;
+
+    if (!response.ok) {
+      const text = await response.text();
+      let responseJson = null;
+      try {
+        responseJson = JSON.parse(text);
+      } catch {
+        responseJson = { errorText: text };
+      }
+      return {
+        email: recipient.email,
+        success: false,
+        error: `Brevo API error ${statusCode}: ${text}`,
+        statusCode,
+        requestJson: payload,
+        responseJson,
+      };
+    }
+
+    const data = await response.json();
+    
+    if (!data.messageId) {
+      return {
+        email: recipient.email,
+        success: false,
+        error: "Brevo response did not return a valid messageId",
+        statusCode,
+        requestJson: payload,
+        responseJson: data,
+      };
+    }
+
+    console.log(`[Brevo API Send Success Log]
+      Recipient: ${recipient.email}
+      Subject: ${recipient.subject}
+      Sender: ${config.senderName} <${config.senderEmail}>
+      Message ID: ${data.messageId}
+      Timestamp: ${new Date().toISOString()}`);
+
+    return {
+      email: recipient.email,
+      messageId: data.messageId,
+      success: true,
+      statusCode,
+      requestJson: payload,
+      responseJson: data,
+    };
+  } catch (err: any) {
+    return {
+      email: recipient.email,
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+      requestJson: payload,
+    };
+  }
 }
 
 function bodyToHtml(text: string): string {

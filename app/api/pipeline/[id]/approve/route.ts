@@ -114,6 +114,9 @@ export async function POST(
                 body: draft.body,
                 status: result.success ? "SENT" : "FAILED",
                 brevoMsgId: result.messageId,
+                errorMessage: result.error ?? null,
+                requestJson: result.requestJson ?? null,
+                responseJson: result.responseJson ?? null,
                 sentAt: result.success ? new Date() : undefined,
               },
             });
@@ -122,12 +125,14 @@ export async function POST(
 
         const sentCount = results.filter((r) => r.success).length;
         const failedCount = results.filter((r) => !r.success).length;
+        const firstFailure = results.find((r) => !r.success);
 
         await prisma.campaign.update({
           where: { id: campaign.id },
           data: { 
             status: sentCount > 0 ? "SENT" : "FAILED", 
-            sentAt: sentCount > 0 ? new Date() : undefined 
+            sentAt: sentCount > 0 ? new Date() : undefined,
+            errorMessage: firstFailure?.error ?? null,
           },
         });
 
@@ -160,11 +165,15 @@ export async function POST(
 
         console.log(`[Approve] Campaign ${campaign.id} finished. Sent: ${sentCount}, Failed: ${failedCount}, Final Run Status: ${finalStatus}`);
       } catch (err: any) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);
         // Mark campaign as failed so user can see the error
         await prisma.campaign.update({
           where: { id: campaign.id },
-          data: { status: "FAILED" },
+          data: { 
+            status: "FAILED",
+            errorMessage: errMsg,
+          },
         }).catch(() => {});
 
         // Save failure details in AuditLog so we can query and debug
@@ -176,7 +185,7 @@ export async function POST(
             resource: campaign.id,
             metadata: {
               runId,
-              error: err instanceof Error ? err.message : String(err),
+              error: errMsg,
             },
           },
         }).catch((auditErr) => {
