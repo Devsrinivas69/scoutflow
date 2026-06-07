@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
 import { sendOutreachEmails } from "@/lib/services/email.provider";
@@ -84,11 +84,11 @@ export async function POST(
     // [Resend Trace Step 1/8] Campaign approved by user, starting async outreach pipeline.
     console.log(`[Resend Trace Step 1/8] Campaign approved for run ${runId} by user ${actingUserId}. Status changed to APPROVED.`);
 
-    // Respond immediately — don't block the HTTP request on email delivery
-    // The actual sending happens asynchronously after response is sent
-    void (async () => {
+    // Use Next.js `after()` to schedule email delivery after the response is sent.
+    // This ensures the work completes reliably on Railway — unlike void async which gets killed.
+    after(async () => {
       try {
-        console.log(`[Resend Trace] Campaign ${campaign.id} background worker started.`);
+        console.log(`[Resend Trace] Campaign ${campaign.id} after() worker started.`);
         const resendStart = Date.now();
         
         // sendOutreachEmails handles Step 2 (Recipient Selection), Step 3 (Email Gen), Step 4 (Payload Build), Step 5 (API Request) & Step 6 (API Response).
@@ -183,14 +183,20 @@ export async function POST(
         });
       } catch (err: any) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);
+        console.error(`[Approve] after() send failed for campaign ${campaign.id}:`, err);
         // Mark campaign as failed so user can see the error
         await prisma.campaign.update({
           where: { id: campaign.id },
           data: { 
             status: "FAILED",
-            errorMessage: errMsg,
+            errorMessage: errMsg || "Background email delivery failed unexpectedly",
           },
+        }).catch(() => {});
+
+        // Also update the pipeline run status to FAILED
+        await prisma.pipelineRun.update({
+          where: { id: runId },
+          data: { status: "FAILED", errorMessage: errMsg || "Email delivery failed" },
         }).catch(() => {});
 
         // Save failure details in AuditLog so we can query and debug
@@ -209,7 +215,7 @@ export async function POST(
           console.error("[Approve] Failed to log campaign failure to AuditLog:", auditErr);
         });
       }
-    })();
+    });
 
     // Return immediately — the UI will poll for status updates
     return NextResponse.json({
