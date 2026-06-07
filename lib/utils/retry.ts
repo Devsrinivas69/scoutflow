@@ -9,15 +9,12 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   options: RetryOptions = {}
 ): Promise<T> {
-  const {
-    maxAttempts = 3,
-    initialDelayMs = 500,
-    maxDelayMs = 10000,
-    factor = 2,
-  } = options;
+  // Cap at max 3 retries: Retry 1 -> 2s, Retry 2 -> 5s, Retry 3 -> 10s.
+  // That equals 4 total attempts.
+  const maxAttempts = 4;
+  const retryDelays = [2000, 5000, 10000];
 
   let attempt = 0;
-  let delay = initialDelayMs;
 
   while (attempt < maxAttempts) {
     try {
@@ -26,18 +23,13 @@ export async function withRetry<T>(
       attempt++;
       if (attempt >= maxAttempts) throw error;
 
-      const isRateLimit =
-        error instanceof Error &&
-        (error.message.includes("429") || error.message.includes("rate limit"));
-
-      const waitTime = isRateLimit ? maxDelayMs : Math.min(delay, maxDelayMs);
+      const waitTime = retryDelays[attempt - 1] ?? 10000;
       console.warn(
         `[Retry] Attempt ${attempt}/${maxAttempts} failed. Retrying in ${waitTime}ms...`,
         error instanceof Error ? error.message : error
       );
 
       await new Promise((res) => setTimeout(res, waitTime));
-      delay *= factor;
     }
   }
 
@@ -51,10 +43,14 @@ export async function fetchWithTimeout(
   const { timeoutMs = 10000, ...fetchOptions } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
-  const response = await fetch(resource, {
-    ...fetchOptions,
-    signal: controller.signal,
-  });
-  clearTimeout(id);
-  return response;
+  
+  try {
+    const response = await fetch(resource, {
+      ...fetchOptions,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
 }

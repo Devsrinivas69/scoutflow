@@ -1,6 +1,6 @@
-import { withRetry, fetchWithTimeout } from "@/lib/utils/retry";
-import { getCached, setCached } from "@/lib/redis/cache";
+import { fetchWithTimeout } from "@/lib/utils/retry";
 import type { LookalikeCompany } from "./ocean.service";
+import { getCached, setCached } from "@/lib/redis/cache";
 
 export interface DecisionMaker {
   firstName: string;
@@ -13,28 +13,6 @@ export interface DecisionMaker {
   email?: string;
 }
 
-/**
- * Run tasks with a concurrency limit
- */
-async function pLimit<T>(
-  tasks: (() => Promise<T>)[],
-  concurrency: number
-): Promise<T[]> {
-  const results: T[] = [];
-  let i = 0;
-
-  async function worker() {
-    while (i < tasks.length) {
-      const idx = i++;
-      results[idx] = await tasks[idx]();
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
-  await Promise.all(workers);
-  return results;
-}
-
 export async function findDecisionMakersApollo(
   companies: LookalikeCompany[]
 ): Promise<DecisionMaker[]> {
@@ -44,21 +22,20 @@ export async function findDecisionMakersApollo(
     return [];
   }
 
-  const tasks = companies.map(
-    (company) => async () => {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      return withRetry(() => searchApolloCompanyContacts(company, apiKey)).catch((err) => {
-        console.error(`[Apollo] Failed to get contacts for ${company.domain}:`, err);
-        return [];
-      });
+  const results: DecisionMaker[] = [];
+  for (const company of companies) {
+    try {
+      const contacts = await searchCompanyContactsApollo(company, apiKey);
+      results.push(...contacts);
+    } catch (err) {
+      console.error(`[Apollo Fallback] Failed to search contacts for ${company.domain}:`, err);
     }
-  );
+  }
 
-  const results = await pLimit(tasks, 1);
-  return results.flat();
+  return results;
 }
 
-async function searchApolloCompanyContacts(
+async function searchCompanyContactsApollo(
   company: LookalikeCompany,
   apiKey: string
 ): Promise<DecisionMaker[]> {
@@ -69,8 +46,41 @@ async function searchApolloCompanyContacts(
     return cached;
   }
 
-  // 1. Search for people IDs using mixed_people/api_search
-  const searchResponse = await fetchWithTimeout("https://api.apollo.io/api/v1/mixed_people/api_search", {
+  // Check Postgres DB cache for historical contacts of this domain
+  try {
+    const { prisma } = await import("@/lib/db/prisma");
+    const existingDbContacts = await prisma.contact.findMany({
+      where: {
+        company: {
+          domain: company.domain
+        }
+      },
+      include: {
+        verifiedEmails: true
+      }
+    });
+
+    if (existingDbContacts.length > 0) {
+      console.log(`[Postgres DB Cache] Hit for Apollo contacts of domain: ${company.domain}. Found ${existingDbContacts.length} contacts.`);
+      const contacts = existingDbContacts.map((c) => ({
+        firstName: c.firstName,
+        lastName: c.lastName ?? "",
+        fullName: c.fullName ?? `${c.firstName} ${c.lastName}`.trim(),
+        title: c.title ?? "Decision Maker",
+        linkedinUrl: c.linkedinUrl ?? undefined,
+        companyDomain: company.domain,
+        companyName: company.name,
+        email: c.verifiedEmails[0]?.email ?? undefined,
+      }));
+      await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
+      return contacts;
+    }
+  } catch (dbErr) {
+    console.warn(`[Postgres DB Cache] Failed to check database for existing contacts in Apollo:`, dbErr);
+  }
+
+  console.log(`[Apollo Fallback] Fetching contacts for ${company.domain}...`);
+  const response = await fetchWithTimeout("https://api.apollo.io/api/v1/contacts/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -85,75 +95,33 @@ async function searchApolloCompanyContacts(
         "VP of Sales", "Head of Growth", "Director of Marketing"
       ],
       page: 1,
-      per_page: 10,
+      per_page: 20
     }),
+    timeoutMs: 20000,
   });
 
-  if (!searchResponse.ok) {
-    const text = await searchResponse.text();
-    throw new Error(`Apollo API Search error ${searchResponse.status} for ${company.domain}: ${text}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Apollo API error ${response.status} for ${company.domain}: ${text}`);
   }
 
-  const searchData = await searchResponse.json();
-  const searchPeople = searchData.people ?? [];
-  if (searchPeople.length === 0) {
-    return [];
-  }
+  const data = await response.json();
+  const rawContacts = data.contacts ?? [];
 
-  const personIds = searchPeople.map((p: any) => p.id).filter(Boolean);
-  if (personIds.length === 0) {
-    return [];
-  }
-
-  // 2. Enrich people using people/bulk_match in batches (up to 10)
-  const batchSize = 10;
-  const enrichedPeople: any[] = [];
-
-  for (let i = 0; i < personIds.length; i += batchSize) {
-    const batchIds = personIds.slice(i, i + batchSize);
-
-    if (i > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-
-    const matchResponse = await fetchWithTimeout("https://api.apollo.io/api/v1/people/bulk_match", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Api-Key": apiKey,
-      },
-      body: JSON.stringify({
-        ids: batchIds,
-      }),
-    });
-
-    if (!matchResponse.ok) {
-      const text = await matchResponse.text();
-      console.error(`[Apollo] bulk_match batch error ${matchResponse.status}: ${text}`);
-      continue;
-    }
-
-    const matchData = await matchResponse.json();
-    const matches = matchData.people ?? matchData.matches ?? [];
-    enrichedPeople.push(...matches);
-  }
-
-  const contacts: DecisionMaker[] = enrichedPeople
-    .filter((p: any) => p && (p.first_name || p.name))
-    .map((p: any) => {
-      const firstName = (p.first_name ?? "").trim();
-      const lastName = (p.last_name ?? "").trim();
-      return {
-        firstName,
-        lastName,
-        fullName: p.name || `${firstName} ${lastName}`.trim(),
-        title: p.title || "Decision Maker",
-        linkedinUrl: p.linkedin_url || undefined,
-        companyDomain: company.domain,
-        companyName: company.name,
-        email: p.email || undefined,
-      };
-    });
+  const contacts = rawContacts.map((item: any) => {
+    const firstName = (item.first_name ?? "") as string;
+    const lastName = (item.last_name ?? "") as string;
+    return {
+      firstName,
+      lastName,
+      fullName: item.name ?? `${firstName} ${lastName}`.trim() ?? "",
+      title: (item.title ?? "Decision Maker") as string,
+      linkedinUrl: (item.linkedin_url ?? undefined) as string | undefined,
+      companyDomain: company.domain,
+      companyName: company.name,
+      email: (item.email ?? undefined) as string | undefined,
+    };
+  });
 
   await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
   return contacts;

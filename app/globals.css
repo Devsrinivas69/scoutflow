@@ -234,6 +234,7 @@
     border: 1px solid currentColor;
   }
   .status-completed { color: var(--brand-success); }
+  .status-warning   { color: var(--brand-warning); }
   .status-running   { color: var(--brand-primary); }
   .status-pending   { color: var(--brand-muted); }
   .status-failed    { color: var(--brand-error); }

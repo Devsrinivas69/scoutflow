@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "@/lib/utils/retry";
+
 export interface EmailRecipient {
   name: string;
   email: string;
@@ -49,7 +51,7 @@ async function sendSingleEmail(
   recipient: EmailRecipient,
   config: { apiKey: string; senderEmail: string; senderName: string }
 ): Promise<BrevoSendResult> {
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const response = await fetchWithTimeout("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -65,6 +67,7 @@ async function sendSingleEmail(
       textContent: recipient.body,
       htmlContent: bodyToHtml(recipient.body),
     }),
+    timeoutMs: 15000,
   });
 
   if (!response.ok) {

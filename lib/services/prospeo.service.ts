@@ -56,7 +56,7 @@ export async function findDecisionMakers(
     (company) => async () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       try {
-        return await withRetry(() => searchCompanyContacts(company, apiKey));
+        return await searchCompanyContacts(company, apiKey);
       } catch (err) {
         if (err instanceof RateLimitError || (err instanceof Error && (err.message.includes("429") || err.message.toLowerCase().includes("rate limit")))) {
           throw err;
@@ -87,64 +87,122 @@ async function searchCompanyContacts(
     return cached;
   }
 
-  const response = await fetchWithTimeout("https://api.prospeo.io/search-person", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-KEY": apiKey,
-    },
-    body: JSON.stringify({
-      filters: {
+  // Check Postgres DB cache for historical contacts of this domain
+  try {
+    const { prisma } = await import("@/lib/db/prisma");
+    const existingDbContacts = await prisma.contact.findMany({
+      where: {
         company: {
-          websites: {
-            include: [company.domain]
-          }
-        },
-        person_title: {
-          include: [
-            "CEO", "CTO", "CMO", "COO", "CFO",
-            "VP Sales", "VP Marketing", "Head of Sales",
-            "Director of Sales", "Founder", "Co-Founder",
-            "VP of Sales", "Head of Growth", "Director of Marketing"
-          ]
+          domain: company.domain
         }
       },
-      limit: 10,
-    }),
-  });
+      include: {
+        verifiedEmails: true
+      }
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    if (response.status === 429) {
-      throw new RateLimitError(`Prospeo API rate limit exceeded (429) for ${company.domain}`);
+    if (existingDbContacts.length > 0) {
+      console.log(`[Postgres DB Cache] Hit for Prospeo contacts of domain: ${company.domain}. Found ${existingDbContacts.length} contacts.`);
+      const contacts = existingDbContacts.map((c) => ({
+        firstName: c.firstName,
+        lastName: c.lastName ?? "",
+        fullName: c.fullName ?? `${c.firstName} ${c.lastName}`.trim(),
+        title: c.title ?? "Decision Maker",
+        linkedinUrl: c.linkedinUrl ?? undefined,
+        companyDomain: company.domain,
+        companyName: company.name,
+        email: c.verifiedEmails[0]?.email ?? undefined,
+      }));
+      await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
+      return contacts;
     }
-    throw new Error(`Prospeo API error ${response.status} for ${company.domain}: ${text}`);
+  } catch (dbErr) {
+    console.warn(`[Postgres DB Cache] Failed to check database for existing contacts:`, dbErr);
   }
 
-  const data = await response.json();
-  const results = data.response ?? data.results ?? data.contacts ?? [];
+  let currentPage = 1;
+  let totalPages = 1;
+  const maxPages = 20;
+  const allContacts: DecisionMaker[] = [];
 
-  if (results.length === 0) {
-    return [];
+  while (currentPage <= totalPages) {
+    if (currentPage > maxPages) {
+      console.warn(`[Prospeo] Exceeded maxPages limit of ${maxPages} for ${company.domain}. Stopping pagination.`);
+      break;
+    }
+
+    console.log(`[Prospeo] Fetching page ${currentPage} of ${totalPages} for ${company.domain}...`);
+    const response = await fetchWithTimeout("https://api.prospeo.io/search-person", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-KEY": apiKey,
+      },
+      body: JSON.stringify({
+        filters: {
+          company: {
+            websites: {
+              include: [company.domain]
+            }
+          },
+          person_title: {
+            include: [
+              "CEO", "CTO", "CMO", "COO", "CFO",
+              "VP Sales", "VP Marketing", "Head of Sales",
+              "Director of Sales", "Founder", "Co-Founder",
+              "VP of Sales", "Head of Growth", "Director of Marketing"
+            ]
+          }
+        },
+        limit: 10,
+        page: currentPage,
+      }),
+      timeoutMs: 20000,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 429) {
+        throw new RateLimitError(`Prospeo API rate limit exceeded (429) for ${company.domain}`);
+      }
+      throw new Error(`Prospeo API error ${response.status} for ${company.domain}: ${text}`);
+    }
+
+    const data = await response.json();
+    const results = Array.isArray(data.response)
+      ? data.response
+      : (data.response?.results ?? data.results ?? data.contacts ?? []);
+
+    const pageObj = data.pagination ?? data.response?.pagination;
+    if (pageObj) {
+      totalPages = pageObj.total_pages ?? pageObj.totalPages ?? 1;
+    }
+
+    if (results.length === 0) {
+      break;
+    }
+
+    const contacts = results.map((item: any) => {
+      const p = item.person ?? item ?? {};
+      const firstName = (p.first_name ?? p.firstName ?? "") as string;
+      const lastName = (p.last_name ?? p.lastName ?? "") as string;
+      const email = (p.email ?? item.email ?? p.email_address ?? item.email_address ?? undefined) as string | undefined;
+      return {
+        firstName,
+        lastName,
+        fullName: `${firstName} ${lastName}`.trim() || (p.full_name as string) || "",
+        title: (p.current_job_title ?? p.job_title ?? p.title ?? p.position ?? "Decision Maker") as string,
+        linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
+        companyDomain: company.domain,
+        companyName: company.name,
+        email,
+      };
+    });
+
+    allContacts.push(...contacts);
+    currentPage++;
   }
 
-  const contacts = results.map((item: any) => {
-    const p = item.person ?? item ?? {};
-    const firstName = (p.first_name ?? p.firstName ?? "") as string;
-    const lastName = (p.last_name ?? p.lastName ?? "") as string;
-    const email = (p.email ?? item.email ?? p.email_address ?? item.email_address ?? undefined) as string | undefined;
-    return {
-      firstName,
-      lastName,
-      fullName: `${firstName} ${lastName}`.trim() || (p.full_name as string) || "",
-      title: (p.current_job_title ?? p.job_title ?? p.title ?? p.position ?? "Decision Maker") as string,
-      linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
-      companyDomain: company.domain,
-      companyName: company.name,
-      email,
-    };
-  });
-
-  await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
-  return contacts;
+  await setCached(cacheKey, allContacts, 86400); // 24-hour cache TTL
+  return allContacts;
 }

@@ -93,7 +93,8 @@ function getContactPriorityScore(title: string | null): number {
 
 export async function runPipeline(data: PipelineJobData): Promise<void> {
   const { runId, seedDomain, orgId } = data;
-  console.log(`[Pipeline] Starting run ${runId} for domain: ${seedDomain}`);
+  const pipelineStartTime = Date.now();
+  console.log(`[Milestone] Pipeline Started for run ${runId} at ${new Date(pipelineStartTime).toISOString()}`);
 
   // Start database keep-alive heartbeat to prevent Railway TCP proxy from dropping the idle connection
   const dbKeepAliveInterval = setInterval(async () => {
@@ -104,16 +105,27 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     }
   }, 15000);
 
+  let stage2TimedOut = false;
+
   try {
     // ─── Stage 1: Ocean.io — Find Lookalike Companies ──────────────────
     await updateStage(runId, 1);
-    console.log(`[Stage 1] Finding lookalike companies for ${seedDomain}...`);
-    let lookalikeCompanies = await findLookalikeCompanies(seedDomain);
+    const stage1StartTime = Date.now();
+    console.log(`[Milestone] Ocean Started at ${new Date(stage1StartTime).toISOString()}`);
+
+    let lookalikeCompanies = await Promise.race([
+      findLookalikeCompanies(seedDomain),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Ocean.io search timed out after 30 seconds")), 30000)
+      )
+    ]);
+
     if (process.env.TEST_MODE === "true") {
       console.log(`[Test Mode] Limiting lookalikes to 1 to speed up validation and prevent DB timeouts`);
       lookalikeCompanies = lookalikeCompanies.slice(0, 1);
     }
-    console.log(`[Stage 1] Found ${lookalikeCompanies.length} companies`);
+    const stage1Duration = ((Date.now() - stage1StartTime) / 1000).toFixed(2);
+    console.log(`[Milestone] Ocean Completed in ${stage1Duration}s — Found ${lookalikeCompanies.length} companies`);
 
     const validCompanies: any[] = [];
     for (const c of lookalikeCompanies.filter((c) => c.domain && c.domain !== seedDomain)) {
@@ -147,7 +159,8 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
     // ─── Stage 2: Prospeo — Find Decision Makers ───────────────────────
     await updateStage(runId, 2);
-    console.log(`[Stage 2] Finding decision makers progressively...`);
+    const stage2StartTime = Date.now();
+    console.log(`[Milestone] Prospeo Started at ${new Date(stage2StartTime).toISOString()}`);
 
     const validContacts: any[] = [];
     const companyTasks = lookalikeCompanies
@@ -163,26 +176,43 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         try {
           contacts = await findDecisionMakers([company]);
         } catch (err: any) {
-          const isRateLimit = err.name === "RateLimitError" ||
+          const isFallbackTrigger =
+            err.name === "RateLimitError" ||
             err.message?.includes("429") ||
-            err.message?.toLowerCase().includes("rate limit");
+            err.message?.toLowerCase().includes("rate limit") ||
+            err.message?.includes("403") ||
+            err.message?.includes("500") ||
+            err.message?.includes("502") ||
+            err.message?.includes("503") ||
+            err.message?.includes("504") ||
+            err.message?.toLowerCase().includes("timeout") ||
+            err.message?.toLowerCase().includes("abort");
 
-          if (isRateLimit) {
-            console.warn(`[Stage 2] Prospeo rate limited (429) for ${company.domain}. Activating Apollo fallback...`);
+          if (isFallbackTrigger) {
+            const reason = (err.name === "RateLimitError" || err.message?.includes("429")) ? "prospeo-rate-limit" : "prospeo-api-error";
+            console.warn(`[Stage 2] Prospeo failed (Error: ${err.message}) for ${company.domain}. Activating Apollo fallback...`);
             isFallback = true;
-            failoverReason = "prospeo-rate-limit";
+            failoverReason = reason;
             try {
+              console.log(`[Milestone] Apollo Fallback Started for ${company.domain}`);
+              const startApollo = Date.now();
               contacts = await findDecisionMakersApollo([company]);
+              const apolloDuration = ((Date.now() - startApollo) / 1000).toFixed(2);
+              console.log(`[Milestone] Apollo Fallback Completed for ${company.domain} in ${apolloDuration}s`);
             } catch (apolloErr: any) {
               console.error(`[Stage 2] Apollo fallback also failed for ${company.domain}:`, apolloErr.message ?? apolloErr);
             }
           } else {
-            console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain}:`, err.message ?? err);
+            console.error(`[Stage 2] Prospeo lookup failed for company ${company.domain} with non-fallback error:`, err.message ?? err);
           }
         }
 
         try {
-          const auditedContacts = auditAndScoreContacts(contacts, company.domain);
+          let auditedContacts = auditAndScoreContacts(contacts, company.domain);
+          if (process.env.TEST_MODE === "true") {
+            console.log(`[Test Mode] Limiting contacts to 2 to speed up validation and prevent DB timeouts`);
+            auditedContacts = auditedContacts.slice(0, 2);
+          }
           const successfulUpserts = [];
           
           for (const dm of auditedContacts) {
@@ -225,7 +255,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                       reason: dm.reason,
                       duplicateStatus: dm.duplicateStatus,
                       provider: isFallback ? "apollo-fallback" : "prospeo",
-                      failoverReason: isFallback ? "prospeo-rate-limit" : null,
+                      failoverReason: isFallback ? failoverReason : null,
                     }
                   })
                 );
@@ -245,12 +275,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                       reason: dm.reason,
                       duplicateStatus: dm.duplicateStatus,
                       provider: isFallback ? "apollo-fallback" : "prospeo",
-                      failoverReason: isFallback ? "prospeo-rate-limit" : null,
+                      failoverReason: isFallback ? failoverReason : null,
                     }
                   })
                 );
               }
               successfulUpserts.push(savedContact);
+              validContacts.push(savedContact);
 
               if (dm.email) {
                 const realEmail = dm.email;
@@ -283,7 +314,6 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
               console.error(`[Stage 2] Error saving contact ${dm.fullName}:`, err);
             }
           }
-          validContacts.push(...successfulUpserts);
           console.log(`[Stage 2] Saved ${successfulUpserts.length} contacts progressively for ${company.domain}`);
         } catch (err: any) {
           console.error(`[Stage 2] Processing contacts failed for company ${company.domain}:`, err.message ?? err);
@@ -291,12 +321,29 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         return null;
       });
 
-    await pLimit(companyTasks, 1);
-    console.log(`[Stage 2] Total progressive contacts saved: ${validContacts.length}`);
+    try {
+      await Promise.race([
+        pLimit(companyTasks, 1),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("Stage 2 Contact Discovery timed out after 20 seconds")), 20000)
+        )
+      ]);
+    } catch (err: any) {
+      if (err.message?.includes("timed out")) {
+        console.warn(`[Stage 2] Progressive contact discovery timed out. Proceeding with already found contacts.`);
+        stage2TimedOut = true;
+      } else {
+        throw err;
+      }
+    }
 
-    // ─── Stage 3: EazyReach — Email Discovery ──────────────────────────
+    const stage2Duration = ((Date.now() - stage2StartTime) / 1000).toFixed(2);
+    console.log(`[Milestone] Prospeo Completed in ${stage2Duration}s — Total progressive contacts saved: ${validContacts.length}`);
+
+    // ─── Stage 3: Email Discovery ──────────────────────────────────────
     await updateStage(runId, 3);
-    console.log(`[Stage 3] Gathering provider-sourced emails for outreach...`);
+    const stage3StartTime = Date.now();
+    console.log(`[Milestone] Email Discovery Started at ${new Date(stage3StartTime).toISOString()}`);
 
     const sortedContacts = [...validContacts]
       .filter((c) => c.status === "SELECTED")
@@ -307,32 +354,45 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       });
 
     const verifiedEmails: any[] = [];
-    for (const contact of sortedContacts) {
-      const company = validCompanies.find((c) => c.id === contact.companyId);
-      if (!company) continue;
+    
+    // Perform database lookup for verified emails inside a Promise.race timeout block for safety
+    await Promise.race([
+      (async () => {
+        for (const contact of sortedContacts) {
+          const company = validCompanies.find((c) => c.id === contact.companyId);
+          if (!company) continue;
 
-      // Fetch real email saved in Stage 2 from provider
-      const existingEmail = await prisma.verifiedEmail.findFirst({
-        where: { contactId: contact.id },
-      });
+          // Fetch real email saved in Stage 2 from provider
+          const existingEmail = await prisma.verifiedEmail.findFirst({
+            where: { contactId: contact.id },
+          });
 
-      if (existingEmail) {
-        console.log(`[Stage 3] Found provider-sourced email for ${contact.fullName}: ${existingEmail.email}`);
-        verifiedEmails.push({
-          email: existingEmail.email,
-          contactFullName: contact.fullName,
-          contactFirstName: contact.firstName,
-          contactTitle: contact.title,
-          companyName: company.name,
-          companyDomain: company.domain,
-          status: existingEmail.status,
-          patternUsed: null,
-          confidenceScore: null,
-          reasoning: existingEmail.reasoning,
-        });
-      }
-    }
-    console.log(`[Stage 3] Total real emails gathered: ${verifiedEmails.length}`);
+          if (existingEmail) {
+            console.log(`[Stage 3] Found provider-sourced email for ${contact.fullName}: ${existingEmail.email}`);
+            verifiedEmails.push({
+              email: existingEmail.email,
+              contactFullName: contact.fullName,
+              contactFirstName: contact.firstName,
+              contactTitle: contact.title,
+              companyName: company.name,
+              companyDomain: company.domain,
+              status: existingEmail.status,
+              patternUsed: null,
+              confidenceScore: null,
+              reasoning: existingEmail.reasoning,
+            });
+          }
+        }
+      })(),
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("Stage 3 Email Discovery timed out after 20 seconds")), 20000)
+      )
+    ]).catch((err) => {
+      console.warn(`[Stage 3] Email Discovery encountered a timeout/error: ${err.message}. Proceeding with gathered emails.`);
+    });
+
+    const stage3Duration = ((Date.now() - stage3StartTime) / 1000).toFixed(2);
+    console.log(`[Milestone] Email Discovery Completed in ${stage3Duration}s — Total real emails gathered: ${verifiedEmails.length}`);
 
     // ─── Stage 4: Generate Email Drafts ────────────────────────────────
     await updateStage(runId, 4);
@@ -359,48 +419,80 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
         }),
       }));
 
-    await withRetry(() =>
-      prisma.campaign.create({
-        data: {
-          runId,
-          orgId,
-          status: "PENDING_APPROVAL",
-          subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
-          bodyTemplate: DEFAULT_BODY_TEMPLATE,
-          emailsJson: emailDrafts,
-        },
-      })
-    );
-
+    const isApolloUsed = validContacts.some(c => c.provider === "apollo-fallback");
     const stats = {
       companiesFound: validCompanies.length,
       contactsFound: validContacts.length,
       verifiedEmails: verifiedEmails.length,
       emailsReady: emailDrafts.length,
-      apolloFallbackActivated: validContacts.some(c => c.provider === "apollo-fallback"),
+      apolloFallbackActivated: isApolloUsed,
+      stage2TimedOut,
     };
 
-    await withRetry(() =>
-      prisma.pipelineRun.update({
-        where: { id: runId },
-        data: {
-          status: "PENDING_APPROVAL",
-          currentStage: 4,
-          completedAt: new Date(),
-          statsJson: stats,
-        },
-      })
-    );
+    const totalDuration = ((Date.now() - pipelineStartTime) / 1000).toFixed(2);
 
-    console.log(`[Pipeline Run Telemetry]
-      Run ID: ${runId}
-      Domain: ${seedDomain}
-      Companies found: ${stats.companiesFound}
-      Contacts found: ${stats.contactsFound}
-      Emails found: ${stats.verifiedEmails}
-      API Errors encountered: none (completed successfully)`);
+    if (emailDrafts.length === 0) {
+      // Continuation Logic: if 0 emails are ready, transition to COMPLETED_WITH_WARNINGS and Campaign FAILED
+      await withRetry(() =>
+        prisma.campaign.create({
+          data: {
+            runId,
+            orgId,
+            status: "FAILED",
+            subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
+            bodyTemplate: DEFAULT_BODY_TEMPLATE,
+            emailsJson: [],
+          },
+        })
+      );
+
+      await withRetry(() =>
+        prisma.pipelineRun.update({
+          where: { id: runId },
+          data: {
+            status: "COMPLETED_WITH_WARNINGS",
+            currentStage: 4,
+            completedAt: new Date(),
+            statsJson: stats,
+            errorMessage: "No contact emails found",
+          },
+        })
+      );
+
+      console.log(`[Milestone] Pipeline Completed with Warnings in ${totalDuration}s — No emails found. Run ID: ${runId}`);
+    } else {
+      // Normal flow: transition to PENDING_APPROVAL
+      await withRetry(() =>
+        prisma.campaign.create({
+          data: {
+            runId,
+            orgId,
+            status: "PENDING_APPROVAL",
+            subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
+            bodyTemplate: DEFAULT_BODY_TEMPLATE,
+            emailsJson: emailDrafts,
+          },
+        })
+      );
+
+      await withRetry(() =>
+        prisma.pipelineRun.update({
+          where: { id: runId },
+          data: {
+            status: "PENDING_APPROVAL",
+            currentStage: 4,
+            completedAt: new Date(),
+            statsJson: stats,
+          },
+        })
+      );
+
+      console.log(`[Milestone] Pipeline Completed in ${totalDuration}s — Run ID: ${runId} (Status: PENDING_APPROVAL, Drafts: ${emailDrafts.length})`);
+    }
+
   } catch (error) {
-    console.error(`[Pipeline Run Telemetry Failure] Run ${runId} failed:`, error);
+    const totalDuration = ((Date.now() - pipelineStartTime) / 1000).toFixed(2);
+    console.error(`[Milestone] Pipeline Failed in ${totalDuration}s — Run ID: ${runId} error:`, error);
     console.error(`[Pipeline Run Telemetry Failure Details]
       Run ID: ${runId}
       Domain: ${seedDomain}

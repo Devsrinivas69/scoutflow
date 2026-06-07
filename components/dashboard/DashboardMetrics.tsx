@@ -20,7 +20,7 @@ export default async function DashboardMetrics() {
     // Scoped to org via the run relation
     prisma.contact.count({ where: { run: { orgId } } }),
     prisma.pipelineRun.count({
-      where: { orgId, status: { in: ["RUNNING", "PENDING", "PENDING_APPROVAL"] } },
+      where: { orgId, status: { in: ["RUNNING", "PENDING", "PENDING_APPROVAL", "APPROVED"] } },
     }),
     prisma.pipelineRun.findMany({
       where: { orgId, userId: session?.user?.id },
@@ -128,7 +128,7 @@ export default async function DashboardMetrics() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {["RUNNING", "PENDING"].includes(run.status) ? (
+                      {["RUNNING", "PENDING", "APPROVED", "SENDING"].includes(run.status) ? (
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20">
                           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
                           <span className="text-[10px] font-semibold text-primary uppercase">Scanning</span>
@@ -137,6 +137,11 @@ export default async function DashboardMetrics() {
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary border border-border">
                           <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground"></div>
                           <span className="text-[10px] font-semibold text-muted-foreground uppercase">Completed</span>
+                        </div>
+                      ) : run.status === "COMPLETED_WITH_WARNINGS" ? (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-warning/20 border border-warning/30">
+                          <div className="w-1.5 h-1.5 rounded-full bg-warning"></div>
+                          <span className="text-[10px] font-semibold text-warning uppercase">Completed w/ Warnings</span>
                         </div>
                       ) : run.status === "PENDING_APPROVAL" ? (
                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-warning/20 border border-warning/30">

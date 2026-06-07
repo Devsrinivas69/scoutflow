@@ -85,7 +85,7 @@ export default function MissionView() {
     {
       refreshInterval: (currentData) => {
         if (!currentData) return 2000;
-        return currentData.status === "RUNNING" || currentData.status === "PENDING" ? 2000 : 0;
+        return ["PENDING", "RUNNING", "APPROVED", "SENDING"].includes(currentData.status) ? 2000 : 0;
       },
       onSuccess: (d) => {
         if (d.status === "PENDING_APPROVAL" && d.campaign?.status === "PENDING_APPROVAL" && !showApproval) {
@@ -135,7 +135,7 @@ export default function MissionView() {
     );
   }
 
-  const isComplete = data.status === "COMPLETED";
+  const isComplete = data.status === "COMPLETED" || data.status === "COMPLETED_WITH_WARNINGS";
   const isFailed = data.status === "FAILED";
 
   return (
@@ -167,9 +167,12 @@ export default function MissionView() {
             <span className="text-[var(--brand-muted)] font-mono text-[10px] uppercase mb-1">Status</span>
             <span
               className={`status-badge ${
-                isComplete ? "status-completed" :
+                data.status === "COMPLETED" ? "status-completed" :
+                data.status === "COMPLETED_WITH_WARNINGS" ? "status-warning" :
                 data.status === "RUNNING" ? "status-running" :
                 data.status === "PENDING_APPROVAL" ? "status-running" :
+                data.status === "APPROVED" ? "status-running" :
+                data.status === "SENDING" ? "status-running" :
                 isFailed ? "status-failed" : "status-pending"
               }`}
             >
@@ -447,7 +450,7 @@ export default function MissionView() {
                               {c.provider === "apollo-fallback" ? "Apollo Fallback" : "Prospeo"}
                             </span>
                           </div>
-                        ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
+                        ) : data.status === "COMPLETED" || data.status === "COMPLETED_WITH_WARNINGS" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
                           <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">
                             {c.email || "No email available"}
                           </span>

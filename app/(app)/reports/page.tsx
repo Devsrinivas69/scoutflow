@@ -9,7 +9,7 @@ async function getReportData(orgId: string) {
     prisma.emailLog.count({ where: { campaign: { orgId }, status: "OPENED" } }),
     prisma.emailLog.count({ where: { campaign: { orgId }, status: "REPLIED" } }),
     prisma.pipelineRun.findMany({
-      where: { orgId, status: "COMPLETED" },
+      where: { orgId, status: { in: ["COMPLETED", "COMPLETED_WITH_WARNINGS"] } },
       orderBy: { createdAt: "desc" },
       take: 10,
       select: { id: true, seedDomain: true, statsJson: true, createdAt: true, completedAt: true },

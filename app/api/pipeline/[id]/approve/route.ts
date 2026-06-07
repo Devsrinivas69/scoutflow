@@ -85,7 +85,11 @@ export async function POST(
     const actingUserId = session.user.id; // capture before async boundary
     void (async () => {
       try {
+        console.log(`[Milestone] Brevo Send Started for campaign ${campaign.id} at ${new Date().toISOString()}`);
+        const brevoStart = Date.now();
         const results = await sendOutreachEmails(emailDrafts);
+        const brevoDuration = ((Date.now() - brevoStart) / 1000).toFixed(2);
+        console.log(`[Milestone] Brevo Send Completed for campaign ${campaign.id} in ${brevoDuration}s`);
 
         // Save email logs
         const contacts = await prisma.contact.findMany({
@@ -127,9 +131,21 @@ export async function POST(
           },
         });
 
+        // Determine final run status
+        const stats = (run.statsJson as any) ?? {};
+        const apolloActivated = stats.apolloFallbackActivated === true || stats.stage2TimedOut === true;
+        const hasWarning = failedCount > 0 || apolloActivated;
+
+        let finalStatus: "COMPLETED" | "COMPLETED_WITH_WARNINGS" | "FAILED" = "COMPLETED";
+        if (sentCount === 0) {
+          finalStatus = "FAILED";
+        } else if (hasWarning) {
+          finalStatus = "COMPLETED_WITH_WARNINGS";
+        }
+
         await prisma.pipelineRun.update({
           where: { id: runId },
-          data: { status: sentCount > 0 ? "COMPLETED" : "FAILED" },
+          data: { status: finalStatus },
         });
 
         await prisma.auditLog.create({
@@ -138,11 +154,11 @@ export async function POST(
             userId: actingUserId,
             action: "campaign.sent",
             resource: campaign.id,
-            metadata: { sentCount, failedCount, runId },
+            metadata: { sentCount, failedCount, runId, finalStatus },
           },
         });
 
-        console.log(`[Approve] Campaign ${campaign.id} sent: ${sentCount} ok, ${failedCount} failed`);
+        console.log(`[Approve] Campaign ${campaign.id} finished. Sent: ${sentCount}, Failed: ${failedCount}, Final Run Status: ${finalStatus}`);
       } catch (err) {
         console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);
         // Mark campaign as failed so user can see the error
