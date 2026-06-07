@@ -159,13 +159,29 @@ export async function POST(
         });
 
         console.log(`[Approve] Campaign ${campaign.id} finished. Sent: ${sentCount}, Failed: ${failedCount}, Final Run Status: ${finalStatus}`);
-      } catch (err) {
+      } catch (err: any) {
         console.error(`[Approve] Background send failed for campaign ${campaign.id}:`, err);
         // Mark campaign as failed so user can see the error
         await prisma.campaign.update({
           where: { id: campaign.id },
           data: { status: "FAILED" },
         }).catch(() => {});
+
+        // Save failure details in AuditLog so we can query and debug
+        await prisma.auditLog.create({
+          data: {
+            orgId: run.orgId,
+            userId: actingUserId,
+            action: "campaign.failed",
+            resource: campaign.id,
+            metadata: {
+              runId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          },
+        }).catch((auditErr) => {
+          console.error("[Approve] Failed to log campaign failure to AuditLog:", auditErr);
+        });
       }
     })();
 
