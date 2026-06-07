@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import {
   Search, Users, Shield, Mail, CheckCircle, Clock,
-  AlertCircle, Loader2, Send, Globe, Check,
+  AlertCircle, Loader2, Send, Globe, Check, ExternalLink,
+  AlertTriangle, Zap, Info,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import useSWR from "swr";
@@ -238,6 +239,8 @@ export default function MissionView() {
             else if (isComplete || data.currentStage > stage.num) state = "done";
             else if (data.currentStage === stage.num && data.status !== "PENDING_APPROVAL") state = "active";
             else if (data.status === "PENDING_APPROVAL" && stage.num === 4) state = "active";
+            // COMPLETED_WITH_WARNINGS means outreach ran — mark stage 4 as done
+            if (data.status === "COMPLETED_WITH_WARNINGS" && stage.num === 4) state = "done";
 
             return (
               <div key={stage.num} className="flex flex-col items-center relative w-32">
@@ -323,126 +326,123 @@ export default function MissionView() {
         </div>
         {/* Right Column: Feeds */}
         <div className="lg:col-span-8 space-y-8">
-          {/* Real-time Email Campaign Progress Banner */}
-          {data.campaign && ["SENDING", "SENT", "FAILED"].includes(data.campaign.status) && (
+          {/* ── Campaign Sending Status ─────────────────────────────── */}
+          {data.campaign && data.campaign.status === "SENDING" && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`panel bg-[#000] ${
-                data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
-                  ? "border-[var(--brand-error)]"
-                  : data.campaign.status === "SENDING"
-                  ? "border-[var(--brand-warning)]"
-                  : "border-[var(--brand-success)]"
-              }`}
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--brand-primary)]/30 bg-[rgba(109,93,246,0.06)] text-[var(--brand-primary)] text-xs font-mono"
             >
-              <div
-                className={`panel-header ${
-                  data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
-                    ? "bg-[rgba(239,68,68,0.05)]"
-                    : data.campaign.status === "SENDING"
-                    ? "bg-[rgba(245,158,11,0.05)]"
-                    : "bg-[rgba(226,255,61,0.05)]"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  {data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
-                    <AlertCircle className="w-5 h-5 text-[var(--brand-error)]" />
-                  ) : data.campaign.status === "SENDING" ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-[var(--brand-warning)]" />
-                  ) : (
-                    <CheckCircle className="w-5 h-5 text-[var(--brand-success)]" />
-                  )}
-                  <span
-                    className={`font-mono text-sm uppercase ${
-                      data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
-                        ? "text-[var(--brand-error)]"
-                        : data.campaign.status === "SENDING"
-                        ? "text-[var(--brand-warning)]"
-                        : "text-[var(--brand-success)]"
-                    }`}
-                  >
-                    {data.campaign.status === "FAILED" || (data.campaign.status === "SENT" && (data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)
-                      ? "Delivery Failed"
-                      : data.campaign.status === "SENDING"
-                      ? "Delivering Payload..."
-                      : "Mission Accomplished"}
-                  </span>
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+              <span className="uppercase tracking-wider font-bold">Sending outreach — {data.campaign.sentCount ?? 0} delivered so far…</span>
+            </motion.div>
+          )}
+
+          {data.campaign && data.campaign.status === "SENT" && (data.campaign.sentCount ?? 0) > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--brand-success)]/30 bg-[rgba(0,200,150,0.06)] text-[var(--brand-success)] text-xs font-mono"
+            >
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              <span className="uppercase tracking-wider font-bold">
+                {data.campaign.sentCount} email{(data.campaign.sentCount ?? 0) !== 1 ? "s" : ""} delivered
+                {(data.campaign.failedCount ?? 0) > 0 && <span className="text-[var(--brand-error)] ml-2">· {data.campaign.failedCount} failed</span>}
+              </span>
+            </motion.div>
+          )}
+
+          {/* ── Delivery Failed — Beautiful Premium Alert ───────────── */}
+          {data.campaign && (data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0)) && (
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+              className="rounded-xl border border-[var(--brand-error)]/40 bg-gradient-to-br from-[rgba(239,68,68,0.08)] to-[rgba(239,68,68,0.03)] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--brand-error)]/20 bg-[rgba(239,68,68,0.06)]">
+                <div className="w-8 h-8 rounded-lg bg-[rgba(239,68,68,0.15)] border border-[var(--brand-error)]/30 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-4 h-4 text-[var(--brand-error)]" />
+                </div>
+                <div>
+                  <p className="text-[var(--brand-error)] font-bold text-sm uppercase tracking-widest">Delivery Failed</p>
+                  <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">All emails were rejected by the outreach provider.</p>
                 </div>
               </div>
-              <div className="p-6 font-mono text-sm space-y-2">
-                {data.campaign.status === "SENDING" ? (
-                  <p className="text-[var(--brand-text)]">
-                    Sending outreach emails in background. Progress: {data.campaign.sentCount ?? 0} sent, {data.campaign.failedCount ?? 0} failed (out of {data.campaign.emailsJson.length} total).
-                  </p>
-                ) : data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
-                  <div className="text-[var(--brand-error)] space-y-3">
-                    <p className="font-semibold">All deliveries failed.</p>
-                    {data.campaign.errorMessage ? (
-                      <>
-                        <div className="bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 p-3 rounded text-xs font-mono break-all whitespace-pre-wrap">
-                          {data.campaign.errorMessage}
-                        </div>
-                        {/* Targeted fix tips based on error content */}
-                        {(data.campaign.errorMessage.includes("401") || data.campaign.errorMessage.toLowerCase().includes("unauthorized") || data.campaign.errorMessage.toLowerCase().includes("sender")) && (
-                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
-                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo Sender Not Verified</p>
-                            <p className="text-[var(--brand-muted)]">Go to <span className="text-white font-mono">app.brevo.com → Senders &amp; IPs → Add &amp; Verify Sender</span> and verify <span className="text-white font-mono">contact@scout-flow.app</span>. Brevo blocks all sends from unverified senders.</p>
-                          </div>
-                        )}
-                        {data.campaign.errorMessage.includes("402") && (
-                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
-                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo Daily Quota Exceeded</p>
-                            <p className="text-[var(--brand-muted)]">Your Brevo plan daily sending limit has been reached. Upgrade your plan or wait until the quota resets.</p>
-                          </div>
-                        )}
-                        {(data.campaign.errorMessage.includes("403") || data.campaign.errorMessage.toLowerCase().includes("forbidden")) && (
-                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
-                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo API Key Invalid</p>
-                            <p className="text-[var(--brand-muted)]">Check that <span className="text-white font-mono">BREVO_API_KEY</span> in your environment is correct and has SMTP sending permissions enabled.</p>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-2">
-                        <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Most Likely Cause: Sender Not Verified</p>
-                        <p className="text-[var(--brand-muted)]">Brevo silently rejects sends from unverified senders. Go to <span className="text-white font-mono">app.brevo.com → Senders &amp; IPs → Add &amp; Verify Sender</span> and verify <span className="text-white font-mono">contact@scout-flow.app</span>.</p>
-                        <p className="text-[var(--brand-muted)]">Also verify: API key permissions, domain authentication (SPF/DKIM), and daily quota.</p>
-                      </div>
-                    )}
-                  </div>
 
-                ) : (
-                  <>
-                    <p className="text-[var(--brand-text)]">
-                      Outreach payload successfully delivered to {data.campaign.sentCount ?? 0} target(s).
+              <div className="p-5 space-y-4">
+                {/* Most Likely Cause */}
+                <div className="rounded-lg border border-[var(--brand-warning)]/30 bg-[rgba(255,181,71,0.06)] p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="w-3.5 h-3.5 text-[var(--brand-warning)] shrink-0" />
+                    <span className="text-[var(--brand-warning)] font-mono text-[10px] uppercase tracking-widest font-bold">Most Likely Cause: Sender Not Verified</span>
+                  </div>
+                  <p className="text-[var(--brand-text)] text-xs leading-relaxed mb-3">
+                    Brevo silently rejects sends from unverified senders. Your sender{" "}
+                    <code className="bg-black/40 px-1.5 py-0.5 rounded border border-white/10 text-[var(--brand-warning)] font-mono">
+                      {process.env.NEXT_PUBLIC_BREVO_SENDER_EMAIL ?? "contact@scout-flow.app"}
+                    </code>
+                    {" "}must be verified before emails can be sent.
+                  </p>
+                  <a
+                    href="https://app.brevo.com/senders/list"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--brand-warning)] text-black text-[11px] font-bold uppercase tracking-wide hover:opacity-90 transition-opacity"
+                  >
+                    Verify Sender on Brevo <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                {/* Error detail if available */}
+                {data.campaign.errorMessage && (
+                  <div className="rounded-lg border border-white/5 bg-black/30 p-3">
+                    <p className="text-[var(--brand-muted)] text-[10px] uppercase tracking-widest font-mono mb-1.5">Provider Response</p>
+                    <p className="text-[var(--brand-error)]/80 font-mono text-[11px] leading-relaxed break-all">
+                      {data.campaign.errorMessage}
                     </p>
-                    {(data.campaign.failedCount ?? 0) > 0 && (
-                      <p className="text-[var(--brand-error)]">
-                        {data.campaign.failedCount} delivery attempt(s) failed.
-                      </p>
-                    )}
-                  </>
+                  </div>
                 )}
+
+                {/* Checklist */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  {[
+                    { label: "API Key valid", hint: "Check Brevo → Settings → API" },
+                    { label: "SPF / DKIM set", hint: "Check DNS for scout-flow.app" },
+                    { label: "Daily quota OK", hint: "Brevo free plan: 300/day" },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-start gap-2 p-2.5 rounded border border-white/5 bg-white/[0.02]">
+                      <Info className="w-3 h-3 text-[var(--brand-muted)] mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-white text-[10px] font-semibold">{item.label}</p>
+                        <p className="text-[var(--brand-muted)] text-[9px] font-mono mt-0.5">{item.hint}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </motion.div>
           )}
 
+          {/* ── Pipeline Hard Failure ──────────────────────────────── */}
           {isFailed && data.errorMessage && (
-            <div className="panel border-[var(--brand-error)]">
-              <div className="panel-header">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-[var(--brand-error)]" />
-                  <span className="font-mono text-xs uppercase text-[var(--brand-error)]">Pipeline Failed</span>
-                </div>
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-xl border border-[var(--brand-error)]/40 bg-gradient-to-br from-[rgba(239,68,68,0.08)] to-transparent overflow-hidden"
+            >
+              <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--brand-error)]/20">
+                <AlertCircle className="w-4 h-4 text-[var(--brand-error)] shrink-0" />
+                <span className="font-mono text-xs uppercase text-[var(--brand-error)] font-bold tracking-widest">Pipeline Failed</span>
               </div>
-              <div className="p-6">
-                <p className="text-[var(--brand-muted)] font-mono text-sm">{data.errorMessage}</p>
+              <div className="p-5">
+                <p className="text-[var(--brand-muted)] font-mono text-sm leading-relaxed">{data.errorMessage}</p>
               </div>
-            </div>
+            </motion.div>
           )}
 
-          {/* Provider Warnings Banner — shown when Prospeo/Apollo had issues */}
+          {/* ── Provider Warnings — Premium Alert Card ─────────────── */}
           {(() => {
             const warnings = data.stats?.providerWarnings ?? [];
             const hasProspeoRateLimit = warnings.some(w => w.provider === "Prospeo" && w.status === "RateLimited") ||
@@ -451,38 +451,42 @@ export default function MissionView() {
               data.stats?.apolloUnavailable;
             const hasAnyWarning = hasProspeoRateLimit || hasApolloForbidden || warnings.length > 0;
             if (!hasAnyWarning) return null;
-
             return (
               <motion.div
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="panel border-[var(--brand-warning)] bg-[#000] mb-8"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="rounded-xl border border-[var(--brand-warning)]/30 bg-gradient-to-br from-[rgba(255,181,71,0.07)] to-[rgba(255,181,71,0.02)] overflow-hidden"
               >
-                <div className="panel-header bg-[rgba(255,181,71,0.05)] border-b border-[var(--brand-warning)]">
-                  <div className="flex items-center gap-3">
-                    <AlertCircle className="w-5 h-5 text-[var(--brand-warning)] animate-pulse" />
-                    <span className="font-mono text-sm uppercase text-[var(--brand-warning)] font-bold">
-                      Pipeline Completed With Warnings
-                    </span>
+                <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--brand-warning)]/15">
+                  <div className="w-7 h-7 rounded-lg bg-[rgba(255,181,71,0.12)] border border-[var(--brand-warning)]/25 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-3.5 h-3.5 text-[var(--brand-warning)]" />
+                  </div>
+                  <div>
+                    <p className="text-[var(--brand-warning)] font-bold text-xs uppercase tracking-widest">Pipeline Completed with Warnings</p>
+                    <p className="text-[var(--brand-muted)] text-[10px] font-mono mt-0.5">Provider issues detected — data quality may be reduced.</p>
                   </div>
                 </div>
-                <div className="p-6 font-mono text-sm text-[var(--brand-text)] leading-relaxed space-y-3">
-                  <p className="text-[var(--brand-muted)] text-xs uppercase tracking-wider mb-3">Provider Issues Detected:</p>
+                <div className="p-4 space-y-3">
                   {hasProspeoRateLimit && (
-                    <div className="flex items-start gap-3 p-3 bg-[rgba(255,181,71,0.05)] border border-[var(--brand-warning)]/20 rounded">
-                      <AlertCircle className="w-4 h-4 text-[var(--brand-warning)] mt-0.5 shrink-0" />
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-black/20 border border-white/5">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[rgba(255,181,71,0.1)] border border-[var(--brand-warning)]/25 text-[var(--brand-warning)] font-mono text-[9px] uppercase font-bold shrink-0 mt-0.5">
+                        Prospeo 429
+                      </span>
                       <div>
-                        <div className="text-[var(--brand-warning)] font-bold text-xs uppercase">Prospeo — Rate Limited</div>
-                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">HTTP 429 returned. Apollo fallback was activated to continue contact discovery.</div>
+                        <p className="text-[var(--brand-text)] text-xs font-medium">Prospeo — Rate Limited</p>
+                        <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">HTTP 429 hit during contact discovery. Apollo was used as the fallback provider for affected domains.</p>
                       </div>
                     </div>
                   )}
                   {hasApolloForbidden && (
-                    <div className="flex items-start gap-3 p-3 bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 rounded">
-                      <AlertCircle className="w-4 h-4 text-[var(--brand-error)] mt-0.5 shrink-0" />
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-black/20 border border-white/5">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[rgba(239,68,68,0.1)] border border-[var(--brand-error)]/25 text-[var(--brand-error)] font-mono text-[9px] uppercase font-bold shrink-0 mt-0.5">
+                        Apollo 403
+                      </span>
                       <div>
-                        <div className="text-[var(--brand-error)] font-bold text-xs uppercase">Apollo — Plan Restriction</div>
-                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">403 API_INACCESSIBLE: Apollo&apos;s mixed_people/search endpoint requires a paid plan. Provider marked unavailable. Pipeline continued with available data.</div>
+                        <p className="text-[var(--brand-text)] text-xs font-medium">Apollo — Plan Restriction</p>
+                        <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">403 API_INACCESSIBLE: Apollo&apos;s mixed_people/search endpoint requires a paid plan. Domains where Prospeo had zero results may show no contacts.</p>
                       </div>
                     </div>
                   )}
@@ -490,11 +494,13 @@ export default function MissionView() {
                     !(w.provider === "Prospeo" && w.status === "RateLimited") &&
                     !(w.provider === "Apollo" && w.status === "Unavailable")
                   ).map((w, idx) => (
-                    <div key={idx} className="flex items-start gap-3 p-3 bg-[rgba(255,181,71,0.05)] border border-[var(--brand-warning)]/20 rounded">
-                      <AlertCircle className="w-4 h-4 text-[var(--brand-warning)] mt-0.5 shrink-0" />
+                    <div key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-black/20 border border-white/5">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[rgba(255,181,71,0.1)] border border-[var(--brand-warning)]/25 text-[var(--brand-warning)] font-mono text-[9px] uppercase font-bold shrink-0 mt-0.5">
+                        {w.provider}
+                      </span>
                       <div>
-                        <div className="text-[var(--brand-warning)] font-bold text-xs uppercase">{w.provider} — {w.status}</div>
-                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">{w.reason}</div>
+                        <p className="text-[var(--brand-text)] text-xs font-medium">{w.provider} — {w.status}</p>
+                        <p className="text-[var(--brand-muted)] text-[11px] font-mono mt-0.5">{w.reason}</p>
                       </div>
                     </div>
                   ))}

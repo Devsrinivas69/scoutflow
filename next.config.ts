@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  env: {
+    NEXT_PUBLIC_BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL ?? "",
+  },
   experimental: {
     serverActions: {
       allowedOrigins: [
