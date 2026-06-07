@@ -89,18 +89,7 @@ export async function GET(
 
         let emailSource = "UNKNOWN_SOURCE";
         if (ve) {
-          const emailLower = ve.email.toLowerCase();
-          if (emailLower.includes("example.com") || emailLower.includes("company.com")) {
-            emailSource = "PLACEHOLDER_EMAIL";
-          } else if (ve.reasoning?.includes("mock") || emailLower.includes("mock-")) {
-            emailSource = "MOCK_EMAIL";
-          } else if (ve.patternUsed) {
-            emailSource = "PREDICTED_EMAIL";
-          } else if (ve.reasoning?.includes("Prospeo") || ve.reasoning?.includes("legitimate")) {
-            emailSource = "REAL_EMAIL";
-          } else {
-            emailSource = "REAL_EMAIL";
-          }
+          emailSource = "REAL_EMAIL";
         }
 
         let cleanLinkedinUrl = null;
@@ -116,7 +105,7 @@ export async function GET(
           firstName: c.firstName,
           lastName: c.lastName,
           title: c.title,
-          email: ve?.email ?? null,
+          email: ve?.email ?? "No email available from Prospeo",
           patternUsed: ve?.patternUsed ?? null,
           confidenceScore: ve?.confidenceScore ?? null,
           reasoning: ve?.reasoning ?? null,

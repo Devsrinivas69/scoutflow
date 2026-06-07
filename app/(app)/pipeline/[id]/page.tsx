@@ -9,8 +9,6 @@ import {
 import { motion } from "framer-motion";
 import useSWR from "swr";
 import dynamic from "next/dynamic";
-import { generateAndScorePatterns } from "@/lib/utils/email-generator";
-
 // Fetcher defined outside component so SWR deduplication works correctly
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -275,7 +273,7 @@ export default function MissionView() {
           </div>
 
           <div>
-            <div className="metric-label">Predicted Comms</div>
+            <div className="metric-label">Resolved Comms</div>
             <motion.div
               key={data.stats.verifiedEmails}
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -399,20 +397,15 @@ export default function MissionView() {
                           </div>
                           <div className="text-[var(--brand-muted)] text-xs mt-1 flex flex-wrap items-center gap-1.5">
                             <span>{c.title}</span>
-                            {c.email && c.email !== "No verified email found" && (
+                            {c.email && (
                               <>
                                 <span className="text-[var(--brand-border)] font-normal text-[10px]">•</span>
-                                <span className={`font-mono text-[11px] ${c.emailSource === "REAL_EMAIL" ? "text-[var(--brand-success)] font-medium bg-[rgba(34,197,94,0.03)] px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.1)]" : "text-[var(--brand-text)]"}`}>
+                                <span className={`font-mono text-[11px] ${c.email === "No email available from Prospeo" ? "text-[var(--brand-error)]" : "text-[var(--brand-success)] font-medium bg-[rgba(34,197,94,0.03)] px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.1)]"}`}>
                                   {c.email}
                                 </span>
                               </>
                             )}
                           </div>
-                          {c.email && c.email !== "No verified email found" && c.patternUsed && (
-                            <div className="text-[10px] text-[var(--brand-muted)] font-mono mt-1">
-                              Pattern: {c.patternUsed}
-                            </div>
-                          )}
                         </div>
                         {c.status === "REJECTED" ? (
                           <div className="flex flex-col items-end gap-1">
@@ -423,24 +416,13 @@ export default function MissionView() {
                               </span>
                             )}
                           </div>
-                        ) : c.email && c.email !== "No verified email found" ? (
-                          c.emailSource === "REAL_EMAIL" ? (
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded bg-[rgba(34,197,94,0.05)] font-bold">REAL EMAIL</span>
-                              <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">Verified Source</span>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="font-mono text-[10px] text-[var(--brand-primary)] border border-[var(--brand-primary)] px-2 py-0.5 rounded bg-[rgba(226,255,61,0.05)]">PREDICTED</span>
-                              {c.confidenceScore && (
-                                <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
-                                  Confidence: {c.confidenceScore}
-                                </span>
-                              )}
-                            </div>
-                          )
+                        ) : c.email && c.email !== "No email available from Prospeo" ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded bg-[rgba(34,197,94,0.05)] font-bold">REAL EMAIL</span>
+                            <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">Verified Source</span>
+                          </div>
                         ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
-                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">No real email found</span>
+                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">No email available from Prospeo</span>
                         ) : (
                           <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
                         )}
@@ -469,8 +451,10 @@ export default function MissionView() {
                               <span className="text-[var(--brand-text)]">{c.name}</span>
                             </div>
                             <div>
-                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Guesser Confidence:</span>
-                              <span className="text-[var(--brand-text)]">{c.confidenceScore || "N/A"}</span>
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Duplicate Status:</span>
+                              <span className={`text-[var(--brand-text)] ${c.duplicateStatus === "DUPLICATE" ? "text-[var(--brand-error)] font-bold" : ""}`}>
+                                {c.duplicateStatus || "ORIGINAL"}
+                              </span>
                             </div>
                             <div>
                               <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Quality Audit Score:</span>
@@ -481,34 +465,6 @@ export default function MissionView() {
                               ) : (
                                 <span className="text-[var(--brand-text)]">N/A</span>
                               )}
-                            </div>
-                            <div>
-                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Duplicate Status:</span>
-                              <span className={`text-[var(--brand-text)] ${c.duplicateStatus === "DUPLICATE" ? "text-[var(--brand-error)] font-bold" : ""}`}>
-                                {c.duplicateStatus || "ORIGINAL"}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <span className="text-white block uppercase text-[9px] tracking-wider mb-1">Generated Email Candidates:</span>
-                            <div className="pl-3 border-l border-[var(--brand-border)] space-y-1.5 max-h-[160px] overflow-y-auto">
-                              {(() => {
-                                const fn = c.firstName || c.name.split(" ")[0] || "";
-                                const ln = c.lastName || c.name.split(" ").slice(1).join(" ") || "";
-                                const dom = c.companyDomain || "";
-                                if (!fn || !dom) return <div className="text-[var(--brand-error)]">Incomplete name or domain data</div>;
-                                const cands = generateAndScorePatterns(fn, ln, dom);
-                                return cands.map((cand) => {
-                                  const isSelected = cand.email === c.email;
-                                  return (
-                                    <div key={cand.email} className={`flex items-center justify-between text-[11px] ${isSelected ? "text-[var(--brand-success)] font-bold" : ""}`}>
-                                      <span>• {cand.email}</span>
-                                      <span className="text-[9px] opacity-75 font-normal">({cand.pattern} - {cand.score} pts)</span>
-                                    </div>
-                                  );
-                                });
-                              })()}
                             </div>
                           </div>
 
@@ -521,26 +477,17 @@ export default function MissionView() {
                             </div>
                           )}
 
-                          {c.reasoning && (
-                            <div className="pt-2">
-                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Prediction Reasoning:</span>
-                              <div className="text-[var(--brand-text)] bg-[var(--brand-surface-2)] p-2.5 rounded border border-[var(--brand-border)] text-[10px] leading-relaxed">
-                                {c.reasoning}
-                              </div>
-                            </div>
-                          )}
-
                           <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[var(--brand-border)] text-[9px] uppercase tracking-wider font-semibold">
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${c.email ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
-                              DB Stored: {c.email ? "YES" : "NO"}
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && c.email !== "No email available from Prospeo" ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              DB Stored: {c.email && c.email !== "No email available from Prospeo" ? "YES" : "NO"}
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${c.email ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
-                              API Returned: {c.email ? "YES" : "NO"}
+                              <span className={`w-1.5 h-1.5 rounded-full ${c.email && c.email !== "No email available from Prospeo" ? "bg-[var(--brand-success)]" : "bg-[var(--brand-error)]"}`} />
+                              API Returned: {c.email && c.email !== "No email available from Prospeo" ? "YES" : "NO"}
                             </div>
                             <div className="flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full bg-[var(--brand-success)]`} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-success)]" />
                               UI Rendered: YES
                             </div>
                           </div>

@@ -30,6 +30,24 @@ const priorityKeywords = [
 /**
  * Audit, validate, and score Prospeo contact results
  */
+function getContactPriorityScore(title: string): number {
+  const t = title.toLowerCase();
+  if (t.includes("founder") || t.includes("co-founder")) return 100;
+  if (t.includes("ceo")) return 90;
+  if (t.includes("cto")) return 80;
+  if (t.includes("coo")) return 70;
+  if (t.includes("vp sales") || t.includes("vp of sales") || t.includes("vice president of sales") || t.includes("vice president sales")) return 65;
+  if (t.includes("head of growth") || t.includes("head of sales")) return 60;
+  if (t.includes("director")) return 50;
+  if (t.includes("cfo") || t.includes("c-level") || t.includes("president") || t.includes("cmo")) return 45;
+  if (t.includes("vp") || t.includes("vice president")) return 40;
+  if (t.includes("manager") || t.includes("head") || t.includes("lead")) return 30;
+  return 10;
+}
+
+/**
+ * Audit, validate, and score Prospeo contact results
+ */
 export function auditAndScoreContacts(
   contacts: DecisionMaker[],
   searchDomain: string
@@ -37,10 +55,16 @@ export function auditAndScoreContacts(
   const cleanDomain = searchDomain.toLowerCase().replace(/^www\./, "").trim();
   const baseDomainName = cleanDomain.split(".")[0]; // e.g. "stripe" from "stripe.com"
 
-  const seenNormalizedNames = new Set<string>();
+  const seenEmails = new Set<string>();
   const seenLinkedInUrls = new Set<string>();
+  const seenNameCompany = new Set<string>();
 
-  return contacts.map((contact, index) => {
+  // Sort contacts to prefer higher priority titles first:
+  const sortedContacts = [...contacts].sort((a, b) => {
+    return getContactPriorityScore(b.title) - getContactPriorityScore(a.title);
+  });
+
+  return sortedContacts.map((contact, index) => {
     let score = 100;
     let status: "SELECTED" | "REJECTED" = "SELECTED";
     let duplicateStatus: "ORIGINAL" | "DUPLICATE" = "ORIGINAL";
@@ -99,22 +123,26 @@ export function auditAndScoreContacts(
     }
 
     // 5. Duplicate Detection (within current batch run)
-    const normalizedName = `${contact.firstName.trim().toLowerCase()}_${(contact.lastName ?? "").trim().toLowerCase()}`;
+    const email = contact.email ? contact.email.toLowerCase().trim() : null;
     const cleanLinkedinUrl = contact.linkedinUrl ? contact.linkedinUrl.toLowerCase().trim() : null;
+    const normalizedName = `${contact.firstName.trim().toLowerCase()}_${(contact.lastName ?? "").trim().toLowerCase()}`;
+    const nameCompanyKey = `${normalizedName}_${companyName}`;
 
-    const isDuplicateName = seenNormalizedNames.has(normalizedName);
+    const isDuplicateEmail = email && seenEmails.has(email);
     const isDuplicateLinkedin = cleanLinkedinUrl && !cleanLinkedinUrl.startsWith("mock-") && seenLinkedInUrls.has(cleanLinkedinUrl);
+    const isDuplicateNameCompany = seenNameCompany.has(nameCompanyKey);
 
-    if (isDuplicateName || isDuplicateLinkedin) {
+    if (isDuplicateEmail || isDuplicateLinkedin || isDuplicateNameCompany) {
       score = Math.max(0, score - 80);
       status = "REJECTED";
       duplicateStatus = "DUPLICATE";
       rejectNotes.push("Duplicate contact profile detected");
     } else {
-      seenNormalizedNames.add(normalizedName);
+      if (email) seenEmails.add(email);
       if (cleanLinkedinUrl && !cleanLinkedinUrl.startsWith("mock-")) {
         seenLinkedInUrls.add(cleanLinkedinUrl);
       }
+      seenNameCompany.add(nameCompanyKey);
     }
 
     // 6. Final Status check

@@ -9,7 +9,6 @@ import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
 import { findDecisionMakers } from "@/lib/services/prospeo.service";
 import { auditAndScoreContacts } from "@/lib/services/contact-audit.service";
-import { resolveWorkEmails } from "@/lib/services/eazyreach.service";
 import { withRetry } from "@/lib/utils/retry";
 import {
   generateSubject,
@@ -238,11 +237,10 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     await pLimit(companyTasks, 1);
     console.log(`[Stage 2] Total progressive contacts saved: ${validContacts.length}`);
 
-    // ─── Stage 3: EazyReach — Email Discovery Pattern Guesser ──────────
+    // ─── Stage 3: EazyReach — Email Discovery (Prospeo Only) ───────────
     await updateStage(runId, 3);
-    console.log(`[Stage 3] Discovering email patterns progressively...`);
+    console.log(`[Stage 3] Gathering Prospeo emails for outreach...`);
 
-    // Sort contacts by priority score (highest score first) so high-value titles are processed first, filtering for SELECTED status
     const sortedContacts = [...validContacts]
       .filter((c) => c.status === "SELECTED")
       .sort((a, b) => {
@@ -256,13 +254,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
       const company = validCompanies.find((c) => c.id === contact.companyId);
       if (!company) continue;
 
-      // Check if contact already has a verified email from Stage 2
+      // Fetch real email saved in Stage 2 from Prospeo
       const existingEmail = await prisma.verifiedEmail.findFirst({
         where: { contactId: contact.id },
       });
 
       if (existingEmail) {
-        console.log(`[Stage 3] Skipping guesser for ${contact.fullName} - already has real email: ${existingEmail.email}`);
+        console.log(`[Stage 3] Found Prospeo email for ${contact.fullName}: ${existingEmail.email}`);
         verifiedEmails.push({
           email: existingEmail.email,
           contactFullName: contact.fullName,
@@ -271,60 +269,13 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
           companyName: company.name,
           companyDomain: company.domain,
           status: existingEmail.status,
-          patternUsed: existingEmail.patternUsed,
-          confidenceScore: existingEmail.confidenceScore,
+          patternUsed: null,
+          confidenceScore: null,
           reasoning: existingEmail.reasoning,
         });
-        continue;
-      }
-
-      const dm = {
-        firstName: contact.firstName,
-        lastName: contact.lastName ?? "",
-        fullName: contact.fullName ?? `${contact.firstName} ${contact.lastName ?? ""}`.trim(),
-        title: contact.title ?? "",
-        linkedinUrl: contact.linkedinUrl ?? undefined,
-        companyDomain: company.domain,
-        companyName: company.name,
-      };
-
-      try {
-        const resolved = await resolveWorkEmails([dm]);
-        if (resolved && resolved.length > 0) {
-          const ve = resolved[0];
-
-          await withRetry(() =>
-            prisma.verifiedEmail.upsert({
-              where: {
-                contactId_email: { contactId: contact.id, email: ve.email },
-              },
-              create: {
-                contactId: contact.id,
-                email: ve.email,
-                status: ve.status,
-                patternUsed: ve.patternUsed,
-                confidenceScore: ve.confidenceScore,
-                reasoning: ve.reasoning,
-                verifiedAt: new Date(),
-              },
-              update: {
-                status: ve.status,
-                patternUsed: ve.patternUsed,
-                confidenceScore: ve.confidenceScore,
-                reasoning: ve.reasoning,
-                verifiedAt: new Date(),
-              },
-            })
-          );
-
-          verifiedEmails.push(ve);
-          console.log(`[Stage 3] Progressively generated email for: ${dm.fullName} -> ${ve.email} (${ve.confidenceScore} confidence)`);
-        }
-      } catch (err: any) {
-        console.error(`[Stage 3] Error generating email for ${dm.fullName}:`, err.message ?? err);
       }
     }
-    console.log(`[Stage 3] Total progressive emails resolved: ${verifiedEmails.length}`);
+    console.log(`[Stage 3] Total real emails gathered: ${verifiedEmails.length}`);
 
     // ─── Stage 4: Generate Email Drafts ────────────────────────────────
     await updateStage(runId, 4);
