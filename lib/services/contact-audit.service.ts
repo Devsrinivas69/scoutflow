@@ -146,7 +146,7 @@ export function auditAndScoreContacts(
       score = Math.min(100, score + 5);
       auditNotes.push("LinkedIn profile verified");
     } else {
-      score = Math.max(0, score - 20);
+      score = Math.max(0, score - 10); // Reduced from -20: Apollo free tier often omits LinkedIn
       rejectNotes.push("Missing or invalid LinkedIn profile");
     }
 
@@ -181,7 +181,7 @@ export function auditAndScoreContacts(
     }
 
     // 6. Final Status check
-    if (score < 60 && status !== "REJECTED") {
+    if (score < 45 && status !== "REJECTED") {
       status = "REJECTED";
       rejectionReasonCategory = "low_score";
       rejectNotes.push(`Quality score below acceptance threshold (${score}/100)`);

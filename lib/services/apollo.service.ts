@@ -27,7 +27,7 @@ export async function findDecisionMakersApollo(
     return {
       contacts: [],
       metrics: { rawReturned: 0, parsed: 0, emailsReturned: 0, emailsParsed: 0 },
-      rawRequest: { q_organization_domains: [company.domain] },
+      rawRequest: { organization_domains: [company.domain] },
       rawResponse: null,
       status: "api_error",
       errorMessage: err.message ?? "Unknown error",
@@ -105,8 +105,8 @@ async function searchCompanyContactsApollo(
 
   console.log(`[Apollo Fallback] Fetching contacts for ${company.domain}...`);
   const rawRequestPayload = {
-    q_organization_domains: [company.domain],
-    person_titles: [
+    organization_domains: [company.domain],
+    titles: [
       "CEO", "CTO", "CMO", "COO", "CFO",
       "VP Sales", "VP Marketing", "Head of Sales",
       "Director of Sales", "Founder", "Co-Founder",
@@ -116,7 +116,7 @@ async function searchCompanyContactsApollo(
     per_page: 20
   };
 
-  const response = await fetchWithTimeout("https://api.apollo.io/api/v1/mixed_people/search", {
+  const response = await fetchWithTimeout("https://api.apollo.io/api/v1/people/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

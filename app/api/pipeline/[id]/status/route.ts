@@ -43,7 +43,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const stats = (run.statsJson as Record<string, number>) ?? {};
+    const stats = (run.statsJson as Record<string, any>) ?? {};
     const campaign = run.campaigns[0] ?? null;
 
     let sentCount = 0;
@@ -78,6 +78,9 @@ export async function GET(
           run.contacts.reduce((acc, c) => acc + c.verifiedEmails.length, 0),
         emailsReady: stats.emailsReady ?? 0,
         apolloFallbackActivated: stats.apolloFallbackActivated ?? false,
+        apolloUnavailable: stats.apolloUnavailable ?? false,
+        prospeoRateLimited: stats.prospeoRateLimited ?? false,
+        providerWarnings: stats.providerWarnings ?? [],
       },
       discoveryAudits: stats.discoveryAudits ?? [],
       emailDisappearedAudits: stats.emailDisappearedAudits ?? [],

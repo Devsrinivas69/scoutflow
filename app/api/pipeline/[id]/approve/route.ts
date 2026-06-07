@@ -125,14 +125,20 @@ export async function POST(
 
         const sentCount = results.filter((r) => r.success).length;
         const failedCount = results.filter((r) => !r.success).length;
-        const firstFailure = results.find((r) => !r.success);
+        const failureMessages = results
+          .filter((r) => !r.success && r.error)
+          .map((r) => `[${r.email}]: ${r.error}`)
+          .join(" | ");
+        const campaignErrorMessage = failedCount > 0
+          ? (failureMessages || "Brevo delivery failed — check sender verification and API key")
+          : null;
 
         await prisma.campaign.update({
           where: { id: campaign.id },
           data: { 
             status: sentCount > 0 ? "SENT" : "FAILED", 
             sentAt: sentCount > 0 ? new Date() : undefined,
-            errorMessage: firstFailure?.error ?? null,
+            errorMessage: campaignErrorMessage,
           },
         });
 

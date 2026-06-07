@@ -376,21 +376,42 @@ export default function MissionView() {
                     Sending outreach emails in background. Progress: {data.campaign.sentCount ?? 0} sent, {data.campaign.failedCount ?? 0} failed (out of {data.campaign.emailsJson.length} total).
                   </p>
                 ) : data.campaign.status === "FAILED" || ((data.campaign.failedCount ?? 0) > 0 && (data.campaign.sentCount ?? 0) === 0) ? (
-                  <div className="text-[var(--brand-error)] space-y-2">
+                  <div className="text-[var(--brand-error)] space-y-3">
                     <p className="font-semibold">All deliveries failed.</p>
                     {data.campaign.errorMessage ? (
-                      <div className="bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 p-3 rounded text-xs font-mono break-all whitespace-pre-wrap">
-                        Error: {data.campaign.errorMessage}
-                      </div>
+                      <>
+                        <div className="bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 p-3 rounded text-xs font-mono break-all whitespace-pre-wrap">
+                          {data.campaign.errorMessage}
+                        </div>
+                        {/* Targeted fix tips based on error content */}
+                        {(data.campaign.errorMessage.includes("401") || data.campaign.errorMessage.toLowerCase().includes("unauthorized") || data.campaign.errorMessage.toLowerCase().includes("sender")) && (
+                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
+                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo Sender Not Verified</p>
+                            <p className="text-[var(--brand-muted)]">Go to <span className="text-white font-mono">app.brevo.com → Senders &amp; IPs → Add &amp; Verify Sender</span> and verify <span className="text-white font-mono">contact@scout-flow.app</span>. Brevo blocks all sends from unverified senders.</p>
+                          </div>
+                        )}
+                        {data.campaign.errorMessage.includes("402") && (
+                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
+                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo Daily Quota Exceeded</p>
+                            <p className="text-[var(--brand-muted)]">Your Brevo plan daily sending limit has been reached. Upgrade your plan or wait until the quota resets.</p>
+                          </div>
+                        )}
+                        {(data.campaign.errorMessage.includes("403") || data.campaign.errorMessage.toLowerCase().includes("forbidden")) && (
+                          <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-1">
+                            <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Fix: Brevo API Key Invalid</p>
+                            <p className="text-[var(--brand-muted)]">Check that <span className="text-white font-mono">BREVO_API_KEY</span> in your environment is correct and has SMTP sending permissions enabled.</p>
+                          </div>
+                        )}
+                      </>
                     ) : (
-                      <p className="text-xs text-[var(--brand-muted)]">
-                        No error details available. Please check the server logs.
-                      </p>
+                      <div className="bg-[rgba(245,158,11,0.05)] border border-[var(--brand-warning)]/30 p-3 rounded text-xs space-y-2">
+                        <p className="text-[var(--brand-warning)] font-bold uppercase tracking-wider">⚠ Most Likely Cause: Sender Not Verified</p>
+                        <p className="text-[var(--brand-muted)]">Brevo silently rejects sends from unverified senders. Go to <span className="text-white font-mono">app.brevo.com → Senders &amp; IPs → Add &amp; Verify Sender</span> and verify <span className="text-white font-mono">contact@scout-flow.app</span>.</p>
+                        <p className="text-[var(--brand-muted)]">Also verify: API key permissions, domain authentication (SPF/DKIM), and daily quota.</p>
+                      </div>
                     )}
-                    <p className="text-xs text-[var(--brand-muted)]">
-                      Please check your Brevo API key configuration, verified sender details, domain authentication, or daily quota limits.
-                    </p>
                   </div>
+
                 ) : (
                   <>
                     <p className="text-[var(--brand-text)]">
