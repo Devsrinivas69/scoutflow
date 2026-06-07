@@ -50,6 +50,7 @@ interface PipelineStatus {
     status?: string;
     reason?: string | null;
     duplicateStatus?: string;
+    emailSource?: string;
   }>;
   campaign: {
     id: string;
@@ -396,7 +397,17 @@ export default function MissionView() {
                               Click to inspect
                             </span>
                           </div>
-                          <div className="text-[var(--brand-muted)] text-xs mt-1">{c.title}</div>
+                          <div className="text-[var(--brand-muted)] text-xs mt-1 flex flex-wrap items-center gap-1.5">
+                            <span>{c.title}</span>
+                            {c.email && c.email !== "No verified email found" && (
+                              <>
+                                <span className="text-[var(--brand-border)] font-normal text-[10px]">•</span>
+                                <span className={`font-mono text-[11px] ${c.emailSource === "REAL_EMAIL" ? "text-[var(--brand-success)] font-medium bg-[rgba(34,197,94,0.03)] px-1.5 py-0.5 rounded border border-[rgba(34,197,94,0.1)]" : "text-[var(--brand-text)]"}`}>
+                                  {c.email}
+                                </span>
+                              </>
+                            )}
+                          </div>
                           {c.email && c.email !== "No verified email found" && c.patternUsed && (
                             <div className="text-[10px] text-[var(--brand-muted)] font-mono mt-1">
                               Pattern: {c.patternUsed}
@@ -413,16 +424,23 @@ export default function MissionView() {
                             )}
                           </div>
                         ) : c.email && c.email !== "No verified email found" ? (
-                          <div className="flex flex-col items-end gap-1">
-                            <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded">PREDICTED</span>
-                            {c.confidenceScore && (
-                              <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
-                                Confidence: {c.confidenceScore}
-                              </span>
-                            )}
-                          </div>
+                          c.emailSource === "REAL_EMAIL" ? (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="font-mono text-[10px] text-[var(--brand-success)] border border-[var(--brand-success)] px-2 py-0.5 rounded bg-[rgba(34,197,94,0.05)] font-bold">REAL EMAIL</span>
+                              <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">Verified Source</span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="font-mono text-[10px] text-[var(--brand-primary)] border border-[var(--brand-primary)] px-2 py-0.5 rounded bg-[rgba(226,255,61,0.05)]">PREDICTED</span>
+                              {c.confidenceScore && (
+                                <span className="font-mono text-[9px] text-[var(--brand-muted)] uppercase">
+                                  Confidence: {c.confidenceScore}
+                                </span>
+                              )}
+                            </div>
+                          )
                         ) : data.status === "COMPLETED" || data.status === "PENDING_APPROVAL" || data.currentStage > 3 ? (
-                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded">NOT FOUND</span>
+                          <span className="font-mono text-[10px] text-[var(--brand-error)] border border-[var(--brand-error)] px-2 py-1 rounded bg-[rgba(239,68,68,0.05)] uppercase">No real email found</span>
                         ) : (
                           <span className="font-mono text-[10px] text-[var(--brand-muted)] border border-[var(--brand-border)] px-2 py-1 rounded">PENDING</span>
                         )}

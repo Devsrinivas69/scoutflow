@@ -25,8 +25,8 @@ export async function findLookalikeCompanies(
   try {
     const apiKey = process.env.OCEAN_API_KEY;
     if (!apiKey) {
-      console.warn("OCEAN_API_KEY is not set. Falling back to mock companies.");
-      return getMockLookalikeCompanies(seedDomain);
+      console.warn("OCEAN_API_KEY is not set. Returning empty array.");
+      return [];
     }
 
     const companies = await withRetry(async () => {
@@ -67,44 +67,13 @@ export async function findLookalikeCompanies(
         })
       );
 
-      // Fallback: if API returns empty (sandbox/test key), generate mock data
-      if (mapped.length === 0) {
-        return getMockLookalikeCompanies(seedDomain);
-      }
-
       return mapped;
     });
 
     await setCached(cacheKey, companies, 86400); // 24-hour cache TTL
     return companies;
   } catch (err) {
-    console.error(`[Ocean.io] API request failed, falling back to mock data:`, err);
-    return getMockLookalikeCompanies(seedDomain);
+    console.error(`[Ocean.io] API request failed:`, err);
+    return [];
   }
-}
-
-// Fallback mock data for development/testing
-function getMockLookalikeCompanies(seedDomain: string): LookalikeCompany[] {
-  const parts = seedDomain.split(".");
-  const namePart = parts[0];
-  const capitalized = namePart.charAt(0).toUpperCase() + namePart.slice(1);
-
-  const suffixes = [
-    { suffix: " Solutions", domainSuffix: "-solutions.com", industry: "Enterprise Software" },
-    { suffix: " Labs", domainSuffix: "-labs.com", industry: "AI & Research" },
-    { suffix: " Technologies", domainSuffix: "-tech.com", industry: "SaaS Platforms" },
-    { suffix: " Ventures", domainSuffix: "-ventures.com", industry: "Cloud Infrastructure" },
-    { suffix: " Systems", domainSuffix: "-systems.com", industry: "Data Analytics" },
-  ];
-
-  const mockCompanies = suffixes.map((s, i) => ({
-    name: `${capitalized}${s.suffix}`,
-    domain: `${namePart}${s.domainSuffix}`,
-    industry: s.industry,
-    headcount: `${100 + i * 150}-${250 + i * 300}`,
-    country: ["US", "UK", "NL", "DE", "CA"][i % 5],
-  }));
-
-  console.log(`[Ocean.io Mock] Dynamically generated ${mockCompanies.length} lookalike companies for seed: ${seedDomain}`);
-  return mockCompanies;
 }

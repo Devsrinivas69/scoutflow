@@ -12,6 +12,7 @@ export interface AuditedContact {
   status: "SELECTED" | "REJECTED";
   reason: string;
   duplicateStatus: "ORIGINAL" | "DUPLICATE";
+  email?: string;
 }
 
 const rejectKeywords = [
@@ -142,6 +143,7 @@ export function auditAndScoreContacts(
       status,
       reason: reasonText,
       duplicateStatus,
+      email: contact.email,
     };
   });
 }

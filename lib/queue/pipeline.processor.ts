@@ -199,6 +199,30 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                 })
               );
               successfulUpserts.push(savedContact);
+
+              if (dm.email) {
+                const realEmail = dm.email;
+                await withRetry(() =>
+                  prisma.verifiedEmail.upsert({
+                    where: {
+                      contactId_email: { contactId: savedContact.id, email: realEmail },
+                    },
+                    create: {
+                      contactId: savedContact.id,
+                      email: realEmail,
+                      status: "VALID",
+                      reasoning: "Real email obtained from legitimate source (Prospeo API)",
+                      verifiedAt: new Date(),
+                    },
+                    update: {
+                      status: "VALID",
+                      reasoning: "Real email obtained from legitimate source (Prospeo API)",
+                      verifiedAt: new Date(),
+                    },
+                  })
+                );
+                console.log(`[Stage 2] Saved real email: ${realEmail} for ${dm.fullName}`);
+              }
             } catch (err) {
               console.error(`[Stage 2] Error saving contact ${dm.fullName}:`, err);
             }
@@ -231,6 +255,28 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     for (const contact of sortedContacts) {
       const company = validCompanies.find((c) => c.id === contact.companyId);
       if (!company) continue;
+
+      // Check if contact already has a verified email from Stage 2
+      const existingEmail = await prisma.verifiedEmail.findFirst({
+        where: { contactId: contact.id },
+      });
+
+      if (existingEmail) {
+        console.log(`[Stage 3] Skipping guesser for ${contact.fullName} - already has real email: ${existingEmail.email}`);
+        verifiedEmails.push({
+          email: existingEmail.email,
+          contactFullName: contact.fullName,
+          contactFirstName: contact.firstName,
+          contactTitle: contact.title,
+          companyName: company.name,
+          companyDomain: company.domain,
+          status: existingEmail.status,
+          patternUsed: existingEmail.patternUsed,
+          confidenceScore: existingEmail.confidenceScore,
+          reasoning: existingEmail.reasoning,
+        });
+        continue;
+      }
 
       const dm = {
         firstName: contact.firstName,

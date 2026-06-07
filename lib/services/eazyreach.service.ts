@@ -42,6 +42,11 @@ export async function resolveWorkEmails(
     detectedPatternResult = await detectDomainPattern(targetDomain, contacts);
   }
 
+  if (!detectedPatternResult) {
+    console.log(`[EazyReach] No pattern detected for domain ${targetDomain}. Skipping email prediction.`);
+    return [];
+  }
+
   for (const contact of contacts) {
     if (!contact.firstName || !contact.companyDomain) {
       continue;

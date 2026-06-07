@@ -10,6 +10,7 @@ export interface DecisionMaker {
   linkedinUrl?: string;
   companyDomain: string;
   companyName: string;
+  email?: string;
 }
 
 /**
@@ -39,8 +40,8 @@ export async function findDecisionMakers(
 ): Promise<DecisionMaker[]> {
   const apiKey = process.env.PROSPEO_API_KEY;
   if (!apiKey) {
-    console.warn("PROSPEO_API_KEY is not set. Generating mock contacts for all companies.");
-    return companies.flatMap(getMockDecisionMakers);
+    console.warn("PROSPEO_API_KEY is not set. Returning empty array.");
+    return [];
   }
 
   // Run sequentially (concurrency 1) with a 500ms delay to respect Prospeo API rate limits
@@ -49,7 +50,7 @@ export async function findDecisionMakers(
       await new Promise((resolve) => setTimeout(resolve, 500));
       return withRetry(() => searchCompanyContacts(company, apiKey)).catch((err) => {
         console.error(`[Prospeo] Failed to get contacts for ${company.domain}:`, err);
-        return getMockDecisionMakers(company);
+        return [];
       });
     }
   );
@@ -104,15 +105,14 @@ async function searchCompanyContacts(
   const results = data.response ?? data.results ?? data.contacts ?? [];
 
   if (results.length === 0) {
-    const mockContacts = getMockDecisionMakers(company);
-    await setCached(cacheKey, mockContacts, 86400);
-    return mockContacts;
+    return [];
   }
 
   const contacts = results.map((item: any) => {
     const p = item.person ?? item ?? {};
     const firstName = (p.first_name ?? p.firstName ?? "") as string;
     const lastName = (p.last_name ?? p.lastName ?? "") as string;
+    const email = (p.email ?? item.email ?? p.email_address ?? item.email_address ?? undefined) as string | undefined;
     return {
       firstName,
       lastName,
@@ -121,55 +121,10 @@ async function searchCompanyContacts(
       linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
       companyDomain: company.domain,
       companyName: company.name,
+      email,
     };
   });
 
   await setCached(cacheKey, contacts, 86400); // 24-hour cache TTL
-  return contacts;
-}
-
-function getDeterministicIndex(str: string, max: number): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return Math.abs(hash) % max;
-}
-
-function getMockDecisionMakers(company: LookalikeCompany): DecisionMaker[] {
-  const firstNames = ["John", "Sarah", "David", "Emma", "Michael", "Olivia", "James", "Sophia", "Robert", "Isabella", "William", "Mia", "Joseph", "Charlotte", "Daniel", "Amelia", "Thomas", "Harper", "Charles", "Evelyn"];
-  const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin"];
-  const titles = ["CEO", "CTO", "VP of Sales", "Head of Growth", "Director of Marketing", "COO"];
-
-  const hash1 = getDeterministicIndex(company.domain, firstNames.length);
-  const hash2 = getDeterministicIndex(company.domain + "alt", lastNames.length);
-
-  const contacts: DecisionMaker[] = [];
-  
-  // Person 1 (CEO / CTO / Founder)
-  const fn1 = firstNames[hash1];
-  const ln1 = lastNames[hash2];
-  contacts.push({
-    firstName: fn1,
-    lastName: ln1,
-    fullName: `${fn1} ${ln1}`,
-    title: titles[getDeterministicIndex(company.domain, titles.length)],
-    companyDomain: company.domain,
-    companyName: company.name,
-  });
-
-  // Person 2 (Sales / Growth Lead / Marketing)
-  const fn2 = firstNames[(hash1 + 7) % firstNames.length];
-  const ln2 = lastNames[(hash2 + 13) % lastNames.length];
-  contacts.push({
-    firstName: fn2,
-    lastName: ln2,
-    fullName: `${fn2} ${ln2}`,
-    title: "Head of Growth",
-    companyDomain: company.domain,
-    companyName: company.name,
-  });
-
-  console.log(`[Prospeo Mock] Dynamically generated ${contacts.length} mock contacts for ${company.domain}`);
   return contacts;
 }
