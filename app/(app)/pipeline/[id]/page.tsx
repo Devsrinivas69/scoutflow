@@ -30,6 +30,9 @@ interface PipelineStatus {
     verifiedEmails: number;
     emailsReady: number;
     apolloFallbackActivated?: boolean;
+    apolloUnavailable?: boolean;
+    prospeoRateLimited?: boolean;
+    providerWarnings?: Array<{ provider: string; status: string; reason: string }>;
   };
   companies: Array<{ name: string; domain: string; industry?: string; country?: string }>;
   contacts: Array<{
@@ -418,26 +421,66 @@ export default function MissionView() {
             </div>
           )}
 
-          {/* Fallback Banner */}
-          {(data.stats?.apolloFallbackActivated || data.contacts.some(c => c.provider === "apollo-fallback")) && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="panel border-[var(--brand-warning)] bg-[#000] mb-8"
-            >
-              <div className="panel-header bg-[rgba(255,181,71,0.05)] border-b border-[var(--brand-warning)]">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-[var(--brand-warning)] animate-pulse" />
-                  <span className="font-mono text-sm uppercase text-[var(--brand-warning)] font-bold">
-                    Prospeo Rate Limited — Apollo Activated
-                  </span>
+          {/* Provider Warnings Banner — shown when Prospeo/Apollo had issues */}
+          {(() => {
+            const warnings = data.stats?.providerWarnings ?? [];
+            const hasProspeoRateLimit = warnings.some(w => w.provider === "Prospeo" && w.status === "RateLimited") ||
+              (data.stats?.apolloFallbackActivated || data.contacts.some(c => c.provider === "apollo-fallback"));
+            const hasApolloForbidden = warnings.some(w => w.provider === "Apollo" && w.status === "Unavailable") ||
+              data.stats?.apolloUnavailable;
+            const hasAnyWarning = hasProspeoRateLimit || hasApolloForbidden || warnings.length > 0;
+            if (!hasAnyWarning) return null;
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="panel border-[var(--brand-warning)] bg-[#000] mb-8"
+              >
+                <div className="panel-header bg-[rgba(255,181,71,0.05)] border-b border-[var(--brand-warning)]">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-[var(--brand-warning)] animate-pulse" />
+                    <span className="font-mono text-sm uppercase text-[var(--brand-warning)] font-bold">
+                      Pipeline Completed With Warnings
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="p-6 font-mono text-sm text-[var(--brand-text)] leading-relaxed">
-                Primary provider Prospeo returned HTTP 429. Emergency failover pipeline successfully routed contact discovery through Apollo.
-              </div>
-            </motion.div>
-          )}
+                <div className="p-6 font-mono text-sm text-[var(--brand-text)] leading-relaxed space-y-3">
+                  <p className="text-[var(--brand-muted)] text-xs uppercase tracking-wider mb-3">Provider Issues Detected:</p>
+                  {hasProspeoRateLimit && (
+                    <div className="flex items-start gap-3 p-3 bg-[rgba(255,181,71,0.05)] border border-[var(--brand-warning)]/20 rounded">
+                      <AlertCircle className="w-4 h-4 text-[var(--brand-warning)] mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-[var(--brand-warning)] font-bold text-xs uppercase">Prospeo — Rate Limited</div>
+                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">HTTP 429 returned. Apollo fallback was activated to continue contact discovery.</div>
+                      </div>
+                    </div>
+                  )}
+                  {hasApolloForbidden && (
+                    <div className="flex items-start gap-3 p-3 bg-[rgba(239,68,68,0.05)] border border-[var(--brand-error)]/20 rounded">
+                      <AlertCircle className="w-4 h-4 text-[var(--brand-error)] mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-[var(--brand-error)] font-bold text-xs uppercase">Apollo — Plan Restriction</div>
+                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">403 API_INACCESSIBLE: Apollo&apos;s mixed_people/search endpoint requires a paid plan. Provider marked unavailable. Pipeline continued with available data.</div>
+                      </div>
+                    </div>
+                  )}
+                  {warnings.filter(w =>
+                    !(w.provider === "Prospeo" && w.status === "RateLimited") &&
+                    !(w.provider === "Apollo" && w.status === "Unavailable")
+                  ).map((w, idx) => (
+                    <div key={idx} className="flex items-start gap-3 p-3 bg-[rgba(255,181,71,0.05)] border border-[var(--brand-warning)]/20 rounded">
+                      <AlertCircle className="w-4 h-4 text-[var(--brand-warning)] mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-[var(--brand-warning)] font-bold text-xs uppercase">{w.provider} — {w.status}</div>
+                        <div className="text-[var(--brand-muted)] text-xs mt-0.5">{w.reason}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })()}
 
           {/* Provider Transparency & Telemetry Audit Dashboard */}
           {data.discoveryAudits && data.discoveryAudits.length > 0 && (

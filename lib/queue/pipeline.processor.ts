@@ -33,7 +33,9 @@ async function updateStage(runId: string, stage: number, status?: string) {
 }
 
 /**
- * Controlled concurrency runner
+ * Controlled concurrency runner — isolated error boundaries per task.
+ * Task-level failures are caught and logged; they never propagate to
+ * the pool level so a single provider error cannot crash the pipeline.
  */
 async function pLimit<T>(
   tasks: (() => Promise<T | null>)[],
@@ -48,8 +50,9 @@ async function pLimit<T>(
       try {
         results[idx] = await tasks[idx]();
       } catch (err) {
-        console.error(`[pLimit] Task error at index ${idx}:`, err);
-        throw err;
+        // Isolated: log but do NOT re-throw — pipeline must continue
+        console.error(`[pLimit] Task error at index ${idx} (isolated, pipeline continues):`, err);
+        results[idx] = null;
       }
     }
   }
@@ -166,6 +169,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
 
     const validContacts: any[] = [];
     const companyAudits: any[] = [];
+    const providerWarnings: Array<{ provider: string; status: string; reason: string }> = [];
 
     const companyTasks = lookalikeCompanies
       .filter((c) => c.domain)
@@ -210,6 +214,16 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
           } else if (prospeoResult.status === "rate_limited") {
             failoverReason = "prospeo-rate-limit";
             console.warn(`[Stage 2] Prospeo rate limited (429) for ${company.domain}. Activating Apollo fallback...`);
+            const alreadyRecordedProspeo = providerWarnings.some(
+              (w) => w.provider === "Prospeo" && w.status === "RateLimited"
+            );
+            if (!alreadyRecordedProspeo) {
+              providerWarnings.push({
+                provider: "Prospeo",
+                status: "RateLimited",
+                reason: "HTTP 429 \u2014 rate limit exceeded",
+              });
+            }
           } else {
             failoverReason = "prospeo-api-error";
             console.warn(`[Stage 2] Prospeo API error (${prospeoResult.errorMessage}) for ${company.domain}. Activating Apollo fallback...`);
@@ -229,9 +243,29 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
             };
           }
 
-          // Fail loudly if Apollo key is forbidden (e.g. Free key 403 API_INACCESSIBLE)
+          // Apollo 403 API_INACCESSIBLE — provider unavailable, do NOT throw.
+          // Record the warning and continue; pipeline will finish as COMPLETED_WITH_WARNINGS.
           if (apolloResult.status === "forbidden") {
-            throw new Error(`Apollo fallback failed: API Forbidden (403 API_INACCESSIBLE). Your Apollo API Key requires a paid plan to use mixed_people/search. Details: ${apolloResult.errorMessage}`);
+            console.warn(
+              `[Stage 2] Apollo fallback unavailable for ${company.domain}: 403 API_INACCESSIBLE. ` +
+              `Apollo plan restriction — mixed_people/search requires a paid Apollo plan. ` +
+              `Marking Apollo unavailable and continuing pipeline. Details: ${apolloResult.errorMessage}`
+            );
+            const alreadyRecorded = providerWarnings.some(
+              (w) => w.provider === "Apollo" && w.status === "Unavailable"
+            );
+            if (!alreadyRecorded) {
+              providerWarnings.push({
+                provider: "Apollo",
+                status: "Unavailable",
+                reason: "API_INACCESSIBLE — paid plan required for mixed_people/search",
+              });
+            }
+            // Apollo is unavailable; fall back to whatever Prospeo returned (may be empty)
+            apolloResult = {
+              ...apolloResult,
+              contacts: [],
+            };
           }
 
           // Determine better result set
@@ -533,12 +567,21 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
     }
 
     const isApolloUsed = validContacts.some(c => c.provider === "apollo-fallback");
+    const isApolloForbidden = providerWarnings.some(
+      (w) => w.provider === "Apollo" && w.status === "Unavailable"
+    );
+    const isProspeoRateLimited = providerWarnings.some(
+      (w) => w.provider === "Prospeo" && w.status === "RateLimited"
+    );
     const stats = {
       companiesFound: validCompanies.length,
       contactsFound: validContacts.length,
       verifiedEmails: verifiedEmails.length,
       emailsReady: emailDrafts.length,
       apolloFallbackActivated: isApolloUsed,
+      apolloUnavailable: isApolloForbidden,
+      prospeoRateLimited: isProspeoRateLimited,
+      providerWarnings,
       stage2TimedOut,
       discoveryAudits: companyAudits,
       emailDisappearedAudits: disappearedEmails,
