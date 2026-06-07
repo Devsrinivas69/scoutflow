@@ -95,6 +95,7 @@ export async function GET(
           email: ve?.email ?? null,
           patternUsed: ve?.patternUsed ?? null,
           confidenceScore: ve?.confidenceScore ?? null,
+          reasoning: ve?.reasoning ?? null,
           companyName: c.company.name,
           companyDomain: c.company.domain,
           linkedinUrl: c.linkedinUrl,

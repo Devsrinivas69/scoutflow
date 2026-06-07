@@ -167,6 +167,7 @@ model VerifiedEmail {
   status          VerificationStatus @default(UNKNOWN)
   patternUsed     String?
   confidenceScore String?
+  reasoning       String?
   verifiedAt      DateTime?
   createdAt       DateTime           @default(now())
 
@@ -243,4 +244,16 @@ model Setting {
 
   @@unique([orgId, key])
   @@map("settings")
+}
+
+model DomainPattern {
+  id              String   @id @default(cuid())
+  domain          String   @unique
+  pattern         String
+  confidenceScore String   // "HIGH" | "MEDIUM" | "LOW"
+  source          String   // "HISTORICAL_DB" | "WEBSITE_SCRAPE" | "MX_FALLBACK" | "POPULARITY"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("domain_patterns")
 }

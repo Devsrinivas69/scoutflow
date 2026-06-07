@@ -240,12 +240,14 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
                 status: ve.status,
                 patternUsed: ve.patternUsed,
                 confidenceScore: ve.confidenceScore,
+                reasoning: ve.reasoning,
                 verifiedAt: new Date(),
               },
               update: {
                 status: ve.status,
                 patternUsed: ve.patternUsed,
                 confidenceScore: ve.confidenceScore,
+                reasoning: ve.reasoning,
                 verifiedAt: new Date(),
               },
             })

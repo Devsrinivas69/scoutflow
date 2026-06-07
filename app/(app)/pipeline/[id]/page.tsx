@@ -9,7 +9,7 @@ import {
 import { motion } from "framer-motion";
 import useSWR from "swr";
 import dynamic from "next/dynamic";
-import { generateAndScorePatterns } from "@/lib/services/eazyreach.service";
+import { generateAndScorePatterns } from "@/lib/utils/email-generator";
 
 // Fetcher defined outside component so SWR deduplication works correctly
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
@@ -42,6 +42,7 @@ interface PipelineStatus {
     email: string | null;
     patternUsed?: string | null;
     confidenceScore?: string | null;
+    reasoning?: string | null;
     companyName?: string;
     companyDomain?: string;
     linkedinUrl?: string | null;
@@ -463,6 +464,15 @@ export default function MissionView() {
                               })()}
                             </div>
                           </div>
+
+                          {c.reasoning && (
+                            <div className="pt-2">
+                              <span className="text-white block uppercase text-[9px] tracking-wider mb-0.5">Prediction Reasoning:</span>
+                              <div className="text-[var(--brand-text)] bg-[var(--brand-surface-2)] p-2.5 rounded border border-[var(--brand-border)] text-[10px] leading-relaxed">
+                                {c.reasoning}
+                              </div>
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-3 gap-2 pt-3 border-t border-[var(--brand-border)] text-[9px] uppercase tracking-wider font-semibold">
                             <div className="flex items-center gap-1.5">
