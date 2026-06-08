@@ -68,8 +68,7 @@ services:
           type: keyvalue
           name: scoutflow-redis
           property: connectionString
-    envVarGroups:
-      - name: scoutflow-shared
+      - fromGroup: scoutflow-shared
 
   # Background Worker (processes BullMQ pipeline jobs)
   - type: worker
@@ -85,5 +84,4 @@ services:
           type: keyvalue
           name: scoutflow-redis
           property: connectionString
-    envVarGroups:
-      - name: scoutflow-shared
+      - fromGroup: scoutflow-shared
