@@ -25,6 +25,7 @@ interface PipelineStatus {
   status: string;
   currentStage: number;
   errorMessage?: string;
+  error?: string;
   stats: {
     companiesFound: number;
     contactsFound: number;
@@ -291,13 +292,13 @@ export default function MissionView() {
     }
   };
 
-  if (error) {
+  if (error || data?.error) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center flex flex-col items-center gap-4">
           <AlertCircle className="w-10 h-10 text-[var(--brand-error)]" />
           <p className="text-[var(--brand-muted)] font-mono uppercase text-xs tracking-widest">
-            Failed to load mission data.
+            {data?.error || "Failed to load mission data."}
           </p>
         </div>
       </div>
@@ -332,12 +333,12 @@ export default function MissionView() {
       <div className="flex flex-col md:flex-row items-start md:items-end justify-between mb-16 gap-6">
         <div>
           <h2 className="text-[var(--brand-primary)] font-mono text-xs uppercase tracking-widest mb-2 flex items-center gap-2">
-            Mission ID <span className="text-[var(--brand-muted)]">{data.id.split("-")[0]}</span>
+            Mission ID <span className="text-[var(--brand-muted)]">{(data.id || "").split("-")[0]}</span>
           </h2>
           <h1 className="text-6xl md:text-7xl font-bold tracking-tighter text-editorial uppercase leading-none">
-            {data.seedDomain.split(".")[0]}
+            {(data.seedDomain || "").split(".")[0]}
             <span className="text-[var(--brand-muted)] text-3xl">
-              .{data.seedDomain.split(".").slice(1).join(".")}
+              .{(data.seedDomain || "").split(".").slice(1).join(".")}
             </span>
           </h1>
         </div>

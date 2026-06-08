@@ -170,13 +170,14 @@ async function searchCompanyContacts(
             include: [company.domain]
           }
         },
-        person_title: {
+        person_job_title: {
           include: [
             "CEO", "CTO", "CMO", "COO", "CFO",
             "VP Sales", "VP Marketing", "Head of Sales",
             "Director of Sales", "Founder", "Co-Founder",
             "VP of Sales", "Head of Growth", "Director of Marketing"
-          ]
+          ],
+          match_mode: "CONTAINS"
         }
       },
       limit: 10,
@@ -223,9 +224,18 @@ async function searchCompanyContacts(
       const p = item.person ?? item ?? {};
       const firstName = (p.first_name ?? p.firstName ?? "") as string;
       const lastName = (p.last_name ?? p.lastName ?? "") as string;
-      const email = (p.email ?? item.email ?? p.email_address ?? item.email_address ?? undefined) as string | undefined;
+      const email = p.email ?? item.email ?? p.email_address ?? item.email_address ?? undefined;
       
-      if (email) totalEmailsReturned++;
+      let emailStr: string | undefined = undefined;
+      if (email) {
+        if (typeof email === "string") {
+          emailStr = email;
+        } else if (typeof email === "object" && email.email) {
+          emailStr = email.email;
+        }
+      }
+
+      if (emailStr) totalEmailsReturned++;
 
       return {
         firstName,
@@ -235,7 +245,8 @@ async function searchCompanyContacts(
         linkedinUrl: (p.linkedin_url ?? p.linkedin ?? undefined) as string | undefined,
         companyDomain: company.domain,
         companyName: company.name,
-        email,
+        email: emailStr,
+        personId: p.person_id as string | undefined,
       };
     });
 
@@ -258,4 +269,46 @@ async function searchCompanyContacts(
     rawResponse: rawResponsePayload,
     status: allContacts.length > 0 ? "success" : "zero_results",
   };
+}
+
+export async function enrichProspeoContact(personId: string): Promise<string | null> {
+  const apiKey = process.env.PROSPEO_API_KEY;
+  if (!apiKey) {
+    console.warn("PROSPEO_API_KEY is not set for enrichment.");
+    return null;
+  }
+
+  try {
+    const response = await fetchWithTimeout("https://api.prospeo.io/enrich-person", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-KEY": apiKey,
+      },
+      body: JSON.stringify({
+        data: {
+          person_id: personId
+        }
+      }),
+      timeoutMs: 20000,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error(`[Prospeo Enrichment] API error ${response.status}: ${text}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const emailObj = data.response?.person?.email ?? data.person?.email;
+    if (emailObj && typeof emailObj === "object" && emailObj.email) {
+      return emailObj.email;
+    } else if (typeof emailObj === "string") {
+      return emailObj;
+    }
+    return null;
+  } catch (err: any) {
+    console.error("[Prospeo Enrichment] Error enriching contact:", err.message ?? err);
+    return null;
+  }
 }

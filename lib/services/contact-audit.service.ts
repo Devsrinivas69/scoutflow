@@ -13,6 +13,7 @@ export interface AuditedContact {
   reason: string;
   duplicateStatus: "ORIGINAL" | "DUPLICATE";
   email?: string;
+  personId?: string;
   rejectionReasonCategory?: "company_mismatch" | "title_keywords" | "missing_linkedin" | "incomplete_name" | "duplicate" | "low_score";
 }
 
@@ -208,6 +209,7 @@ export function auditAndScoreContacts(
       reason: reasonText,
       duplicateStatus,
       email: contact.email,
+      personId: contact.personId,
       rejectionReasonCategory,
     };
   });

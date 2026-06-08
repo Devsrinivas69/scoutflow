@@ -7,7 +7,7 @@
 
 import { prisma } from "@/lib/db/prisma";
 import { findLookalikeCompanies } from "@/lib/services/ocean.service";
-import { findDecisionMakers } from "@/lib/services/prospeo.service";
+import { findDecisionMakers, enrichProspeoContact } from "@/lib/services/prospeo.service";
 import { findDecisionMakersApollo } from "@/lib/services/apollo.service";
 import type { ProviderResult } from "@/lib/services/provider.interface";
 import { auditAndScoreContacts } from "@/lib/services/contact-audit.service";
@@ -341,6 +341,21 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
           const successfulUpserts = [];
           for (const dm of auditedContacts) {
             try {
+              // Enrich the contact email if it is masked or missing and we're using prospeo
+              if (providerUsed === "prospeo" && dm.status === "SELECTED" && dm.personId) {
+                const isMasked = !dm.email || dm.email.includes("*");
+                if (isMasked) {
+                  console.log(`[Stage 2] Contact ${dm.fullName} (${dm.title}) has masked/missing email. Enriching via Prospeo...`);
+                  const enrichedEmail = await enrichProspeoContact(dm.personId);
+                  if (enrichedEmail) {
+                    console.log(`[Stage 2] Successfully enriched: ${enrichedEmail}`);
+                    dm.email = enrichedEmail;
+                  } else {
+                    console.warn(`[Stage 2] Failed to enrich email for ${dm.fullName}`);
+                  }
+                }
+              }
+
               let storedLinkedinUrl = dm.linkedinUrl ?? null;
               if (dm.duplicateStatus === "DUPLICATE" && storedLinkedinUrl) {
                 storedLinkedinUrl = storedLinkedinUrl + `-dup-${Math.random().toString(36).substring(2, 6)}`;
@@ -406,7 +421,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
               successfulUpserts.push(savedContact);
               validContacts.push(savedContact);
 
-              if (dm.email) {
+              if (dm.email && !dm.email.includes("*")) {
                 const realEmail = dm.email;
                 const emailReasoning = providerUsed === "apollo-fallback"
                   ? "Real email obtained from legitimate source (Apollo API Fallback)"

@@ -1,6 +1,5 @@
 import "dotenv/config";
 process.env.TEST_MODE = "true";
-process.env.DATABASE_URL = "postgresql://postgres:vbsSszePRekhgDxluFdClyfFlqBBVXDG@acela.proxy.rlwy.net:44456/railway";
 
 const domains = [
   "stripe.com",

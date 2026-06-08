@@ -9,6 +9,7 @@ export interface DecisionMaker {
   companyDomain: string;
   companyName: string;
   email?: string;
+  personId?: string;
 }
 
 export interface DiscoveryMetric {
