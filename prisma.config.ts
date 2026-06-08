@@ -1,4 +1,7 @@
 import { defineConfig } from "prisma/config";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Prisma 7 config — standard PostgreSQL connection via DATABASE_URL env var
 // For production, ensure DATABASE_URL includes pooling config: ?connection_limit=10&pool_timeout=20
