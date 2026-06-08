@@ -1,11 +1,6 @@
 # Render Blueprint Specification (render.yaml)
 # Refer to https://render.com/docs/blueprint-spec for configuration details.
 
-redis:
-  - name: scoutflow-redis
-    plan: free # Change to starter for production persistent workloads
-    region: oregon # Match database and service regions to minimize latency
-
 envVarGroups:
   - name: scoutflow-shared
     envVars:
@@ -52,6 +47,12 @@ envVarGroups:
         value: "production"
 
 services:
+  # Managed Redis/Valkey (Key-Value) Cache & Queue Store
+  - type: keyvalue
+    name: scoutflow-redis
+    plan: free # Change to starter for production persistent workloads
+    region: oregon # Match database and service regions to minimize latency
+
   # Next.js Frontend & REST APIs
   - type: web
     name: scoutflow-web
@@ -64,7 +65,7 @@ services:
     envVars:
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: scoutflow-redis
           property: connectionString
     envVarGroups:
@@ -81,7 +82,7 @@ services:
     envVars:
       - key: REDIS_URL
         fromService:
-          type: redis
+          type: keyvalue
           name: scoutflow-redis
           property: connectionString
     envVarGroups:
