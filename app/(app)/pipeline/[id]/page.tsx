@@ -230,7 +230,7 @@ const STAGES = [
   { num: 0, icon: Globe, label: "Domain", desc: "Target Acquired" },
   { num: 1, icon: Search, label: "Discovery", desc: "Ocean.io" },
   { num: 2, icon: Users, label: "Contacts", desc: "Prospeo" },
-  { num: 3, icon: Shield, label: "EazyReach", desc: "Email Discovery" },
+  { num: 3, icon: Shield, label: "Resend", desc: "Email Discovery" },
   { num: 4, icon: Mail, label: "Outreach", desc: "Resend" },
 ];
 
