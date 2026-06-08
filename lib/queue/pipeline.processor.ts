@@ -101,7 +101,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
   const pipelineStartTime = Date.now();
   console.log(`[Milestone] Pipeline Started for run ${runId} at ${new Date(pipelineStartTime).toISOString()}`);
 
-  // Start database keep-alive heartbeat to prevent Railway TCP proxy from dropping the idle connection
+  // Start database keep-alive heartbeat to prevent TCP proxy from dropping the idle connection
   const dbKeepAliveInterval = setInterval(async () => {
     try {
       await prisma.$queryRaw`SELECT 1`;

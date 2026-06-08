@@ -85,7 +85,7 @@ export async function POST(
     console.log(`[Resend Trace Step 1/8] Campaign approved for run ${runId} by user ${actingUserId}. Status changed to APPROVED.`);
 
     // Use Next.js `after()` to schedule email delivery after the response is sent.
-    // This ensures the work completes reliably on Railway — unlike void async which gets killed.
+    // This ensures the work completes reliably — unlike void async which gets killed.
     after(async () => {
       try {
         console.log(`[Resend Trace] Campaign ${campaign.id} after() worker started.`);

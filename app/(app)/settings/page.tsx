@@ -65,7 +65,7 @@ export default async function SettingsPage() {
           <h2 className="font-semibold" style={{ color: "#E8EAF6" }}>API Integrations</h2>
         </div>
         <p className="text-sm mb-4" style={{ color: "#6B7BA4" }}>
-          API keys are configured via environment variables for security. Update them in Railway dashboard or your .env file.
+          API keys are configured via environment variables for security. Update them in your .env file.
         </p>
         <div className="space-y-3">
           {apiKeys.map((api) => (
@@ -99,7 +99,7 @@ export default async function SettingsPage() {
             style={{ background: "rgba(109,93,246,0.05)", border: "1px solid rgba(109,93,246,0.15)" }}>
             <p className="text-xs" style={{ color: "#6B7BA4" }}>
               <Settings className="w-3.5 h-3.5 inline mr-1" />
-              Deployment: Railway · Environment: Production
+              Deployment: Local · Environment: Development
             </p>
           </div>
         </div>

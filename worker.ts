@@ -1,5 +1,5 @@
-// worker.ts — Railway Worker Service Entry Point
-// This file is the start command for the scoutflow-worker Railway service.
+// worker.ts — Background Worker Service Entry Point
+// This file is the start command for the scoutflow-worker service.
 // It runs separately from the Next.js app and processes BullMQ pipeline jobs.
 
 import "dotenv/config";
