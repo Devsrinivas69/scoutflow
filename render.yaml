@@ -1,0 +1,87 @@
+# Render Blueprint Specification (render.yaml)
+# Refer to https://render.com/docs/blueprint-spec for configuration details.
+
+databases:
+  - name: scoutflow-redis
+    type: redis
+    plan: free # Change to starter for production persistent workloads
+    region: oregon # Match database and service regions to minimize latency
+
+envVarGroups:
+  - name: scoutflow-shared
+    envVars:
+      # Database connection (Connect directly to Supabase)
+      - key: DATABASE_URL
+        sync: false # Set manually in Render Dashboard
+
+      # NextAuth configuration
+      - key: NEXTAUTH_SECRET
+        generateValue: true # Render will automatically generate a secure 32-byte secret
+      - key: NEXTAUTH_URL
+        sync: false # Set manually in Render Dashboard (e.g. https://scoutflow.onrender.com)
+
+      # Ocean.io credentials
+      - key: OCEAN_API_KEY
+        sync: false # Set manually in Render Dashboard
+
+      # Prospeo credentials
+      - key: PROSPEO_API_KEY
+        sync: false # Set manually in Render Dashboard
+
+      # Resend Configuration
+      - key: RESEND_API_KEY
+        sync: false # Set manually in Render Dashboard
+      - key: RESEND_FROM_NAME
+        value: "ScoutFlow"
+      - key: RESEND_FROM_EMAIL
+        sync: false # Set manually in Render Dashboard (e.g. contact@scout-flow.app)
+      - key: RESEND_REPLY_TO
+        sync: false # Set manually in Render Dashboard (optional)
+
+      # Apollo Fallback (Optional)
+      - key: APOLLO_API_KEY
+        sync: false # Set manually in Render Dashboard (optional)
+
+      # Supabase credentials (Inlined at build time for frontend logic)
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false # Set manually in Render Dashboard
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false # Set manually in Render Dashboard
+
+      # App environment
+      - key: NODE_ENV
+        value: "production"
+
+services:
+  # Next.js Frontend & REST APIs
+  - type: web
+    name: scoutflow-web
+    env: node
+    region: oregon
+    plan: starter # Starter plan is recommended for Next.js production builds
+    buildCommand: npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: REDIS_URL
+        fromDatabase:
+          name: scoutflow-redis
+          property: connectionString
+    envVarGroups:
+      - name: scoutflow-shared
+
+  # Background Worker (processes BullMQ pipeline jobs)
+  - type: worker
+    name: scoutflow-worker
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run db:generate
+    startCommand: npm run worker:prod
+    envVars:
+      - key: REDIS_URL
+        fromDatabase:
+          name: scoutflow-redis
+          property: connectionString
+    envVarGroups:
+      - name: scoutflow-shared
