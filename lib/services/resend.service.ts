@@ -119,51 +119,23 @@ export async function sendSingleResendEmail(
     ...(config.replyTo ? { reply_to: config.replyTo } : {}),
   };
 
-  // Support explicit mock mode via environment variable
-  const isMockMode = process.env.MOCK_EMAILS === "true";
-  if (isMockMode) {
-    const mockMessageId = `mock_msg_${Math.random().toString(36).substring(2, 11)}`;
-    console.log(`[MOCK MODE] Simulating successful email send to ${recipient.email} (Message ID: ${mockMessageId})`);
-    return {
-      email: recipient.email,
-      messageId: mockMessageId,
-      success: true,
-      statusCode: 200,
-      requestJson: payload,
-      responseJson: {
-        requestBody: payload,
-        responseBody: { id: mockMessageId, mock: true },
-        httpStatus: 200,
-        resendErrorCode: null,
-        resendErrorMessage: null,
-        messageId: mockMessageId,
-        requestId: `mock_req_${Math.random().toString(36).substring(2, 11)}`,
-        timestamp: new Date().toISOString(),
-        recipient: recipient.email,
-      },
-    };
-  }
-
   const payloadError = validateResendPayload(payload);
   if (payloadError) {
     console.error(`[Resend Trace] Pre-flight payload validation failed: ${payloadError}`);
-    // Automatic fallback to mock success on payload validation failure for review
-    const mockMessageId = `mock_msg_${Math.random().toString(36).substring(2, 11)}`;
-    console.warn(`[MOCK FALLBACK] Pre-flight validation failed: ${payloadError}. Falling back to mock success for review.`);
     return {
       email: recipient.email,
-      messageId: mockMessageId,
-      success: true,
-      statusCode: 200,
+      success: false,
+      statusCode: 400,
+      error: payloadError,
       requestJson: payload,
       responseJson: {
         requestBody: payload,
-        responseBody: { id: mockMessageId, mock: true, validationError: payloadError },
-        httpStatus: 200,
-        resendErrorCode: null,
-        resendErrorMessage: null,
-        messageId: mockMessageId,
-        requestId: `mock_req_${Math.random().toString(36).substring(2, 11)}`,
+        responseBody: { error: payloadError },
+        httpStatus: 400,
+        resendErrorCode: "VALIDATION_ERROR",
+        resendErrorMessage: payloadError,
+        messageId: null,
+        requestId: null,
         timestamp: new Date().toISOString(),
         recipient: recipient.email,
       },
@@ -209,23 +181,21 @@ export async function sendSingleResendEmail(
     const success = response.ok && !!messageId;
 
     if (!success) {
-      // Automatic fallback to mock success to make it green for review
-      const mockMessageId = `mock_msg_${Math.random().toString(36).substring(2, 11)}`;
-      console.warn(`[MOCK FALLBACK] Resend API error ${statusCode}: ${resendErrorCode ? `[${resendErrorCode}] ` : ""}${resendErrorMessage || responseText}. Falling back to mock success.`);
+      console.warn(`[Resend Trace] API error ${statusCode}: ${resendErrorCode ? `[${resendErrorCode}] ` : ""}${resendErrorMessage || responseText}`);
       return {
         email: recipient.email,
-        messageId: mockMessageId,
-        success: true,
-        statusCode: 200,
+        success: false,
+        statusCode,
+        error: resendErrorMessage || responseText || `Resend returned status ${statusCode}`,
         requestJson: payload,
         responseJson: {
           requestBody: payload,
-          responseBody: { id: mockMessageId, mock: true, originalError: { statusCode, resendErrorCode, resendErrorMessage } },
-          httpStatus: 200,
-          resendErrorCode: null,
-          resendErrorMessage: null,
-          messageId: mockMessageId,
-          requestId: requestId || `mock_req_${Math.random().toString(36).substring(2, 11)}`,
+          responseBody: responseJson,
+          httpStatus: statusCode,
+          resendErrorCode: resendErrorCode || "API_ERROR",
+          resendErrorMessage: resendErrorMessage || `Resend returned status ${statusCode}`,
+          messageId: null,
+          requestId: requestId || null,
           timestamp: new Date().toISOString(),
           recipient: recipient.email,
         },
@@ -242,8 +212,8 @@ export async function sendSingleResendEmail(
         requestBody: payload,
         responseBody: responseJson,
         httpStatus: statusCode,
-        resendErrorCode: resendErrorCode || (success ? null : "API_ERROR"),
-        resendErrorMessage: resendErrorMessage || (success ? null : `Resend returned status ${statusCode}`),
+        resendErrorCode: null,
+        resendErrorMessage: null,
         messageId: messageId || null,
         requestId: requestId || null,
         timestamp: new Date().toISOString(),
@@ -253,24 +223,20 @@ export async function sendSingleResendEmail(
   } catch (err: any) {
     const errorMsg = err.message || String(err);
     console.error(`[Resend Trace] Connection error for ${recipient.email}:`, err);
-    
-    // Automatic fallback to mock success on connection error
-    const mockMessageId = `mock_msg_${Math.random().toString(36).substring(2, 11)}`;
-    console.warn(`[MOCK FALLBACK] Resend connection error: ${errorMsg}. Falling back to mock success.`);
     return {
       email: recipient.email,
-      messageId: mockMessageId,
-      success: true,
-      statusCode: 200,
+      success: false,
+      statusCode: 500,
+      error: errorMsg,
       requestJson: payload,
       responseJson: {
         requestBody: payload,
-        responseBody: { id: mockMessageId, mock: true, originalError: errorMsg },
-        httpStatus: 200,
-        resendErrorCode: null,
-        resendErrorMessage: null,
-        messageId: mockMessageId,
-        requestId: `mock_req_${Math.random().toString(36).substring(2, 11)}`,
+        responseBody: { error: errorMsg },
+        httpStatus: 500,
+        resendErrorCode: "CONNECTION_ERROR",
+        resendErrorMessage: errorMsg,
+        messageId: null,
+        requestId: null,
         timestamp: new Date().toISOString(),
         recipient: recipient.email,
       },

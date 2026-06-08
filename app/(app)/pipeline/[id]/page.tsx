@@ -106,9 +106,9 @@ function diagnoseResendError(errorMessage?: string | null): {
 } {
   if (!errorMessage) {
     return {
-      title: "Unknown Delivery Failure",
-      description: "An unknown error occurred while sending emails via Resend.",
-      badge: "Unknown Error",
+      title: "Delivery Failure",
+      description: "An unexpected error occurred while sending outreach emails. Check the background worker logs for detailed stack traces.",
+      badge: "Delivery Error",
       badgeColor: "error",
       showVerifyLink: false,
     };
@@ -116,60 +116,110 @@ function diagnoseResendError(errorMessage?: string | null): {
 
   const errLower = errorMessage.toLowerCase();
 
-  if (errLower.includes("validation_error") || errLower.includes("not verified") || errLower.includes("unverified") || errLower.includes("sender") || errLower.includes("from")) {
+  // No contacts found case
+  if (errLower.includes("no contact emails") || errLower.includes("no matching records") || errLower.includes("zero recipients") || errLower.includes("no emails")) {
     return {
-      title: "Sender / Domain Unverified",
-      description: "Resend rejected the sender email. Ensure that the domain of your RESEND_FROM_EMAIL is registered and verified in the Resend Dashboard under 'Domains' with valid SPF, DKIM, and DMARC records.",
-      badge: "Unverified Domain",
+      title: "No Contacts Discovered",
+      description: "The pipeline ran successfully but could not find any verified contact email addresses for outreach. Verify that the company domain is active and has public personnel.",
+      badge: "No Contacts",
+      badgeColor: "warning",
+      showVerifyLink: false,
+    };
+  }
+
+  // Testing mode restriction
+  if (errLower.includes("testing mode") || errLower.includes("restricted_api_key") || errLower.includes("restricted api")) {
+    return {
+      title: "Testing Mode Restriction",
+      description: "Resend is in testing mode. On the free tier, you can only send emails to the email address associated with your Resend account. Please upgrade your Resend plan or add the recipient to your authorized list.",
+      badge: "Testing Restricted",
+      badgeColor: "warning",
+      showVerifyLink: false,
+    };
+  }
+
+  // Domain not verified
+  if (errLower.includes("domain") && (errLower.includes("not verified") || errLower.includes("unverified") || errLower.includes("verification"))) {
+    return {
+      title: "Domain Not Verified",
+      description: "Resend rejected the email because the sending domain is not verified. Ensure that your RESEND_FROM_EMAIL domain is registered and fully verified in the Resend Dashboard under 'Domains' with valid SPF, DKIM, and DMARC records.",
+      badge: "Domain Unverified",
       badgeColor: "error",
       showVerifyLink: true,
     };
   }
 
-  if (errLower.includes("unauthorized") || errLower.includes("api-key") || errLower.includes("api key") || errLower.includes("forbidden") || errLower.includes("api_key") || errLower.includes("restricted")) {
+  // Sender unverified
+  if (errLower.includes("sender") && (errLower.includes("not verified") || errLower.includes("unverified") || errLower.includes("from"))) {
     return {
-      title: "Authentication Error",
+      title: "Sender Not Verified",
+      description: "Resend rejected the sender email. Ensure that the sender address belongs to a verified domain on your Resend dashboard.",
+      badge: "Sender Unverified",
+      badgeColor: "error",
+      showVerifyLink: true,
+    };
+  }
+
+  // Invalid API key
+  if (errLower.includes("unauthorized") || errLower.includes("api-key") || errLower.includes("api key") || errLower.includes("forbidden") || errLower.includes("api_key") || errLower.includes("invalid api key")) {
+    return {
+      title: "Invalid API Key",
       description: "The configured RESEND_API_KEY is invalid, expired, or unauthorized. Please verify your API key under Resend -> API Keys.",
-      badge: "Authentication Error",
+      badge: "Invalid API Key",
       badgeColor: "error",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("quota") || errLower.includes("limit") || errLower.includes("exceeded") || errLower.includes("rate")) {
+  // Rate limiting
+  if (errLower.includes("quota") || errLower.includes("limit") || errLower.includes("exceeded") || errLower.includes("rate") || errLower.includes("429")) {
     return {
-      title: "Sending Limit Exceeded",
+      title: "Rate Limited",
       description: "Resend rate limits or daily quotas have been exceeded. Please check your Resend plan details in the Resend dashboard.",
-      badge: "Limit Exceeded",
+      badge: "Rate Limited",
       badgeColor: "warning",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("recipient") || errLower.includes("to") || errLower.includes("invalid_recipient")) {
+  // Invalid recipient
+  if (errLower.includes("recipient") || errLower.includes("to") || errLower.includes("invalid_recipient") || errLower.includes("invalid email")) {
     return {
-      title: "Invalid Recipient",
+      title: "Recipient Invalid",
       description: "Resend rejected the recipient email address. The recipient list may contain invalid or syntactically incorrect emails.",
-      badge: "Invalid Recipient",
+      badge: "Recipient Invalid",
       badgeColor: "warning",
       showVerifyLink: false,
     };
   }
 
-  if (errLower.includes("payload") || errLower.includes("parameter") || errLower.includes("validation")) {
+  // Missing subject
+  if (errLower.includes("subject") && (errLower.includes("missing") || errLower.includes("required") || errLower.includes("empty"))) {
     return {
-      title: "Invalid Payload",
-      description: "The constructed payload does not meet Resend's API requirements. Check Resend API docs or logs for details.",
-      badge: "Invalid Payload",
+      title: "Missing Subject",
+      description: "Resend rejected the email because the subject line is missing or empty. Please specify a subject template.",
+      badge: "Missing Subject",
       badgeColor: "error",
       showVerifyLink: false,
     };
   }
 
+  // Missing content
+  if ((errLower.includes("content") || errLower.includes("body") || errLower.includes("html") || errLower.includes("text")) && (errLower.includes("missing") || errLower.includes("required") || errLower.includes("empty"))) {
+    return {
+      title: "Missing Content",
+      description: "Resend rejected the email because the body content (HTML or Text) is missing. Please specify a body template.",
+      badge: "Missing Content",
+      badgeColor: "error",
+      showVerifyLink: false,
+    };
+  }
+
+  // Fallback to showing the raw Resend error rather than "Unknown Error"
   return {
-    title: "Resend API Error",
+    title: "Resend Provider Error",
     description: errorMessage,
-    badge: "API Failure",
+    badge: "Resend Failure",
     badgeColor: "error",
     showVerifyLink: false,
   };

@@ -599,6 +599,7 @@ export async function runPipeline(data: PipelineJobData): Promise<void> {
             subjectTemplate: DEFAULT_SUBJECT_TEMPLATE,
             bodyTemplate: DEFAULT_BODY_TEMPLATE,
             emailsJson: [],
+            errorMessage: validContacts.length === 0 ? "Provider responded with no matching records." : "No contact emails found",
           },
         })
       );
