@@ -11,8 +11,12 @@ envVarGroups:
       # NextAuth configuration
       - key: NEXTAUTH_SECRET
         generateValue: true # Render will automatically generate a secure 32-byte secret
+      - key: AUTH_SECRET
+        generateValue: true # Modern NextAuth v5 secret
       - key: NEXTAUTH_URL
         sync: false # Set manually in Render Dashboard (e.g. https://scoutflow.onrender.com)
+      - key: AUTH_URL
+        sync: false # Modern NextAuth v5 URL (e.g. https://scoutflow.onrender.com)
       - key: AUTH_TRUST_HOST
         value: "true" # Required by NextAuth v5 in production behind reverse proxies (Render, Railway, etc.)
 
