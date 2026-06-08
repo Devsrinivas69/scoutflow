@@ -13,6 +13,8 @@ envVarGroups:
         generateValue: true # Render will automatically generate a secure 32-byte secret
       - key: NEXTAUTH_URL
         sync: false # Set manually in Render Dashboard (e.g. https://scoutflow.onrender.com)
+      - key: AUTH_TRUST_HOST
+        value: "true" # Required by NextAuth v5 in production behind reverse proxies (Render, Railway, etc.)
 
       # Ocean.io credentials
       - key: OCEAN_API_KEY
