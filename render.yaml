@@ -1,9 +1,8 @@
 # Render Blueprint Specification (render.yaml)
 # Refer to https://render.com/docs/blueprint-spec for configuration details.
 
-databases:
+redis:
   - name: scoutflow-redis
-    type: redis
     plan: free # Change to starter for production persistent workloads
     region: oregon # Match database and service regions to minimize latency
 
@@ -64,7 +63,8 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: REDIS_URL
-        fromDatabase:
+        fromService:
+          type: redis
           name: scoutflow-redis
           property: connectionString
     envVarGroups:
@@ -80,7 +80,8 @@ services:
     startCommand: npm run worker:prod
     envVars:
       - key: REDIS_URL
-        fromDatabase:
+        fromService:
+          type: redis
           name: scoutflow-redis
           property: connectionString
     envVarGroups:
