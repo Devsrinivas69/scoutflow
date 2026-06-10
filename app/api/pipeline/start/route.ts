@@ -105,7 +105,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("[API] Pipeline start error:", error);
     return NextResponse.json(
-      { error: "Failed to start pipeline" },
+      { 
+        error: "Failed to start pipeline", 
+        details: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
