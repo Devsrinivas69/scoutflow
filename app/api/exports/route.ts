@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
-import { withRateLimit } from "@/lib/middleware/rate-limit.middleware";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,16 +8,6 @@ export async function POST(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    // ── Rate limit: 60/min per authenticated user ───────────────────────────
-    const rateLimited = await withRateLimit(
-      req,
-      "general",
-      session.user.id,
-      "/api/exports"
-    );
-    if (rateLimited) return rateLimited;
-
     const orgId = (session.user as { orgId?: string }).orgId;
     if (!orgId) return NextResponse.json({ error: "No org" }, { status: 400 });
 

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
 import { z } from "zod";
-import { withRateLimit } from "@/lib/middleware/rate-limit.middleware";
 
 const startSchema = z.object({
   domain: z
@@ -29,15 +28,6 @@ export async function POST(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    // ── Rate limit: 30/min, 100/hr per authenticated user ───────────────────
-    const rateLimited = await withRateLimit(
-      req,
-      "search",
-      session.user.id,
-      "/api/pipeline/start"
-    );
-    if (rateLimited) return rateLimited;
 
     const body = await req.json();
     const parsed = startSchema.safeParse(body);
