@@ -7,8 +7,12 @@ const startSchema = z.object({
   domain: z
     .string()
     .min(1, "Domain is required")
-    .regex(
-      /^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$/,
+    .max(253, "Domain is too long")
+    .refine(
+      (d) => {
+        const normalized = d.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
+        return /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(normalized);
+      },
       "Please enter a valid domain (e.g. stripe.com)"
     ),
 });
@@ -38,7 +42,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { domain } = parsed.data;
+    const { domain: rawDomain } = parsed.data;
+    // Normalize: strip protocol/trailing slash, lowercase
+    const domain = rawDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
     const userId = session.user.id;
     const orgId = (session.user as { orgId?: string }).orgId;
 
@@ -70,9 +76,9 @@ export async function POST(req: NextRequest) {
       await pipelineQueue.add("process-pipeline", jobData, { jobId: run.id });
       console.log(`[Pipeline Start] Queued job for run ${run.id}`);
     } else {
-      // ── DEV MODE: no Redis — run pipeline directly in-process ────────
+      // ── No Redis — run pipeline directly in-process ────────────────
       console.log(
-        `[Pipeline Start] DEV MODE — running pipeline in-process for run ${run.id} (no Redis)`
+        `[Pipeline Start] Running pipeline in-process for run ${run.id} (no Redis)`
       );
       const { runPipeline } = await import("@/lib/queue/pipeline.processor");
       // Fire-and-forget: don't await so the HTTP response returns immediately
@@ -82,8 +88,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Audit log
-    await prisma.auditLog.create({
+    // Audit log — non-critical: never let this fail the response
+    prisma.auditLog.create({
       data: {
         orgId,
         userId,
@@ -91,6 +97,8 @@ export async function POST(req: NextRequest) {
         resource: run.id,
         metadata: { seedDomain: domain, mode: shouldUseQueue() ? "queue" : "direct" },
       },
+    }).catch((err) => {
+      console.warn("[Pipeline Start] Audit log failed (non-critical):", err?.message ?? err);
     });
 
     return NextResponse.json({ runId: run.id }, { status: 201 });
