@@ -29,8 +29,69 @@ function shouldUseQueue(): boolean {
 export async function POST(req: NextRequest) {
   try {
     const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = session?.user?.id;
+    const email = session?.user?.email;
+    const authProvider = "credentials";
+
+    // Step 1: Verify Authenticated User
+    console.log("[Pipeline Start] Auth Verification Audit:", {
+      userId,
+      email,
+      session,
+      authProvider,
+    });
+
+    if (!userId) {
+      console.warn("[Pipeline Start] Verification failed: No userId in session.");
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    // Step 2 & 3: Verify user exists in database, auto-create/sync if missing
+    let user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      console.warn("[AUTH ERROR] User missing from database. Attempting auto-creation / re-sync...");
+      try {
+        if (email) {
+          const orgId = (session?.user as { orgId?: string })?.orgId;
+          if (orgId) {
+            const org = await prisma.organization.findUnique({ where: { id: orgId } });
+            if (!org) {
+              const slug = (session?.user?.name || email.split("@")[0] || "org").toLowerCase().replace(/\s+/g, "-") + "-" + Date.now();
+              await prisma.organization.create({
+                data: {
+                  id: orgId,
+                  name: session?.user?.name ? `${session.user.name}'s Organization` : "My Organization",
+                  slug,
+                },
+              });
+            }
+          }
+
+          user = await prisma.user.create({
+            data: {
+              id: userId,
+              email,
+              name: session?.user?.name || null,
+              role: (session?.user as { role?: any })?.role || "OWNER",
+              orgId: orgId || null,
+            },
+          });
+          console.log(`[AUTH SYNC] Automatically recreated missing user: ${userId}`);
+        }
+      } catch (syncErr) {
+        console.error("[AUTH SYNC] Failed to auto-create user:", syncErr);
+      }
+    }
+
+    if (!user) {
+      console.error("[AUTH ERROR]\nUser missing from database");
+      return NextResponse.json(
+        { error: "User account not found." },
+        { status: 400 }
+      );
     }
 
     const body = await req.json();
@@ -45,10 +106,15 @@ export async function POST(req: NextRequest) {
     const { domain: rawDomain } = parsed.data;
     // Normalize: strip protocol/trailing slash, lowercase
     const domain = rawDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    const userId = session.user.id;
-    const orgId = (session.user as { orgId?: string }).orgId;
 
-    if (!orgId) {
+    // Step 4: Defensive PipelineRun Creation & Validation
+    if (!user.id || user.id !== userId) {
+      console.error("[Pipeline Start] Defensive validation failed: User ID mismatch or invalid.");
+      return NextResponse.json({ error: "User account mismatch." }, { status: 400 });
+    }
+
+    const finalOrgId = user.orgId;
+    if (!finalOrgId) {
       return NextResponse.json(
         { error: "No organization associated with account" },
         { status: 400 }
@@ -61,12 +127,12 @@ export async function POST(req: NextRequest) {
         seedDomain: domain,
         status: "RUNNING",
         currentStage: 0,
-        userId,
-        orgId,
+        userId: user.id,
+        orgId: finalOrgId,
       },
     });
 
-    const jobData = { runId: run.id, seedDomain: domain, userId, orgId };
+    const jobData = { runId: run.id, seedDomain: domain, userId: user.id, orgId: finalOrgId };
 
     if (shouldUseQueue()) {
       // ── PRODUCTION / Redis available: enqueue via BullMQ ────────────
@@ -91,8 +157,8 @@ export async function POST(req: NextRequest) {
     // Audit log — non-critical: never let this fail the response
     prisma.auditLog.create({
       data: {
-        orgId,
-        userId,
+        orgId: finalOrgId,
+        userId: user.id,
         action: "pipeline.start",
         resource: run.id,
         metadata: { seedDomain: domain, mode: shouldUseQueue() ? "queue" : "direct" },
@@ -104,9 +170,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ runId: run.id }, { status: 201 });
   } catch (error) {
     console.error("[API] Pipeline start error:", error);
+    let errorMsg = "Failed to start pipeline";
+    if (error instanceof Error) {
+      if (error.message.includes("Foreign key constraint") || error.message.includes("violates foreign key constraint")) {
+        errorMsg = "Database relation error: User record missing or mismatched in database.";
+      } else {
+        errorMsg = error.message;
+      }
+    }
     return NextResponse.json(
       { 
-        error: "Failed to start pipeline", 
+        error: errorMsg, 
         details: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
       },
