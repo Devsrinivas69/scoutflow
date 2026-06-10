@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
+import { withRateLimit } from "@/lib/middleware/rate-limit.middleware";
 
 /**
  * POST /api/pipeline/[id]/retry
@@ -16,6 +17,15 @@ export async function POST(
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // ── Rate limit: 60/min per authenticated user ───────────────────────────
+    const rateLimited = await withRateLimit(
+      _req,
+      "general",
+      session.user.id,
+      "/api/pipeline/[id]/retry"
+    );
+    if (rateLimited) return rateLimited;
 
     const { id: runId } = await params;
 

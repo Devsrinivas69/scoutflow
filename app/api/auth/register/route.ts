@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
-import { z } from "zod";
-
-const registerSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
+import { registerSchema } from "@/lib/validation/schemas";
+import {
+  validateEmailForRegistration,
+  normalizeEmail,
+} from "@/lib/validation/email";
+import { withRateLimit } from "@/lib/middleware/rate-limit.middleware";
 
 export async function POST(req: NextRequest) {
+  // ── Rate limit: 10/min, 30/hr per IP ──────────────────────────────────────
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown";
+  const rateLimited = await withRateLimit(req, "auth", ip, "/api/auth/register");
+  if (rateLimited) return rateLimited;
+
   try {
     const body = await req.json();
     const parsed = registerSchema.safeParse(body);
@@ -21,7 +28,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { name, email, password } = parsed.data;
+    const { name, password } = parsed.data;
+    // Email is already normalized (trimmed + lowercased) by the Zod schema
+    const email = normalizeEmail(parsed.data.email);
+
+    // ── Full email validation: format + disposable domain + MX record ────────
+    const emailCheck = await validateEmailForRegistration(email);
+    if (!emailCheck.valid) {
+      return NextResponse.json(
+        { error: "Please enter a valid business or personal email address." },
+        { status: 400 }
+      );
+    }
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {

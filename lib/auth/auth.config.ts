@@ -3,12 +3,8 @@ import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
-import { z } from "zod";
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+import { loginSchema } from "@/lib/validation/schemas";
+import { validateEmailForLogin, normalizeEmail } from "@/lib/validation/email";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -26,10 +22,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
+        // Validate and normalize using shared schema
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const { email, password } = parsed.data;
+        const { password } = parsed.data;
+        // Email is already normalized (trimmed + lowercased) by Zod schema
+        const email = normalizeEmail(parsed.data.email);
+
+        // Fast format + disposable domain check (no MX lookup on login path)
+        const emailCheck = validateEmailForLogin(email);
+        if (!emailCheck.valid) return null;
+
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user?.passwordHash) return null;
 

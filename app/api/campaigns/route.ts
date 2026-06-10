@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth.config";
 import { prisma } from "@/lib/db/prisma";
+import { withRateLimit } from "@/lib/middleware/rate-limit.middleware";
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,6 +9,15 @@ export async function GET(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // ── Rate limit: 30/min, 100/hr per authenticated user ───────────────────
+    const rateLimited = await withRateLimit(
+      req,
+      "search",
+      session.user.id,
+      "/api/campaigns"
+    );
+    if (rateLimited) return rateLimited;
 
     const orgId = (session.user as { orgId?: string }).orgId;
     if (!orgId) return NextResponse.json({ campaigns: [] });
